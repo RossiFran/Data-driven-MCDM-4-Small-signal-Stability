@@ -50,7 +50,7 @@ def knowledge_extraction(df_CCRs_PF_ind, labels, combinations, indicator):
  
         X_train=X_cl.copy().reset_index(drop=True)
         Y_train=Y_cl.copy().reset_index(drop=True)
-        model_rules= DecisionTreeRegressor(min_samples_leaf=0.1)
+        model_rules= DecisionTreeRegressor(min_samples_leaf=0.1,random_state=2)
         
         model_rules.fit(X_train,Y_train)
      

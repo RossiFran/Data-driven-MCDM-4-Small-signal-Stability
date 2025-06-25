@@ -61,7 +61,7 @@ plt.rcParams.update({"figure.figsize" : [8, 6],
 #Read the list of CCRCs: 1:  ; 2:   ; 3:
 exec(open('../Settings/combinations.sav').read())
 
-indicators_list=['H2_freq', 'H2_vdc','DCgain_freq','DCgain_vdc']
+indicators_list=['H2_vdc','DCgain_vdc','H2_freq','DCgain_freq']
 
 indicators_plot_labels=dict()
 indicators_plot_labels['H2_freq']=("$\mathcal{H}_{2,f}$")
@@ -71,7 +71,7 @@ indicators_plot_labels['DCgain_vdc']=("$\mathcal{K}_{V_{DC}}$")
 
 #%%
 path='./Results/'
-path_data='./Data_Generation/Data/'
+path_data='./Data/'
 
 #%%  ---- CREATE dataset with indicator values PFs x Combinations  ----
 df_X_PF = pd.read_excel(path_data+'X_PF.xlsx')
@@ -89,7 +89,7 @@ for indicator in indicators_list:
     X = preprocess_data(df_X_PF_IPC)
     
     n_intervals=5
-    df_X_PCA, x_list, y_list, z_list = PCA_cluster(X, n_intervals, plot=True)
+    df_X_PCA, x_list, y_list, z_list = PCA_cluster(X, n_intervals)#, plot=True)
     
        
     #%%
@@ -97,11 +97,18 @@ for indicator in indicators_list:
     
     heatmap, CCRCs2clustering, df_pf_ind_levels = heatmap_function(n_intervals, x_list, y_list, z_list, indicator, 
                                                 df_X_PCA, df_CCRs_PF_ind, df_pf_ind, 
-                                                combinations, indicators_plot_labels, plot=True)
+                                                combinations, indicators_plot_labels)#, plot=True)
                         
     
     #%% ---- CCRCs CLUSTERING ACCORDING TO SINGLE INDICATOR ----
-    labels, n_clusters = CCRCs_clustering(CCRCs2clustering,heatmap)
+    if indicator == 'DCgain_vdc':
+        seed=2
+    elif indicator == 'H2_vdc':
+        seed=3
+    else:
+        seed=42
+    #seed=42
+    labels, n_clusters = CCRCs_clustering(CCRCs2clustering,heatmap,seed)
 
     #%% ---- CCRCs CLUSTERS KNOWLEDGE EXTRACTION ----
     sorted_clusters_rules, df_CCRs_PF_ind_stable = knowledge_extraction(df_CCRs_PF_ind, labels, combinations, indicator)
@@ -124,14 +131,14 @@ for indicator in indicators_list:
     
     writer.close()
     
-    #%% ---- REARRANGE ATTRIBUTE MATRIX ----
+    #%% ---- #REARRANGE ATTRIBUTE MATRIX ----
     
-    complete_heat_map_rearranged = Rearranged_Attribute_Matrix(df_pf_ind_levels, heatmap, np.arange(0, n_clusters), labels, plot=True ,indicators_plot_labels=indicators_plot_labels, indicator=indicator, save_plot=True)
-    reduced_heat_map_rearranged = Rearranged_Attribute_Matrix(df_pf_ind_levels, heatmap, selected_clusters_unique, labels, plot=True ,indicators_plot_labels=indicators_plot_labels, indicator=indicator, type_matrix='_reduced', save_plot=True)
+    complete_heat_map_rearranged = Rearranged_Attribute_Matrix(df_pf_ind_levels, heatmap, np.arange(0, n_clusters), labels)#, plot=True ,indicators_plot_labels=indicators_plot_labels, indicator=indicator, save_plot=True)
+    reduced_heat_map_rearranged = Rearranged_Attribute_Matrix(df_pf_ind_levels, heatmap, selected_clusters_unique, labels)#, plot=True ,indicators_plot_labels=indicators_plot_labels, indicator=indicator, type_matrix='_reduced', save_plot=True)
 
 #%% ---- APPLY SET INTERSECTION ----
 
-CCRC_dict = set_intersection(n_powerflows, indicators_list, path, plot = True, save_plot = True)
+CCRC_dict = set_intersection(n_powerflows, indicators_list, path, plot=True, save_plot = True)
 
 # WRITE RESULTS    
 f = open(path+"CCRC_dict.sav","w")
