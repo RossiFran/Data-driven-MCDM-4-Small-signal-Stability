@@ -36,7 +36,7 @@ from metrics_n import *
 from utils import *
 from data_preprocessing import *
 from models_comparison import *
-from PFI_code import *
+from training_functions import *
 
 #SAVE THE MODEL
 import joblib
@@ -80,7 +80,7 @@ path_data='./Data/'
 filename='df_selected_combinations.csv'
 
 df=pd.read_csv(path_data+filename).drop('Unnamed: 0',axis=1)
-#df_rgr=df.copy()
+
 #%% SET SCORER METRICS
 
 print('Stable cases = ', df[['Stable']].mean()[0]*100)
