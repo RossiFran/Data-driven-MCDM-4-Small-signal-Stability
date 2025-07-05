@@ -38,8 +38,7 @@ Collects:
 Includes the code for training **data-driven surrogate models** that approximate the exact small-signal stability assessment.
 The training workflow comprises:
 
-* Data cleaning
-* Feature engineering
+* Apply data cleaning and feature engineering
 * Initial model screening
 * Feature selection using **permutation feature importance**
 * Hyperparameter tuning via **grid search with k-fold cross-validation**
@@ -50,15 +49,14 @@ The training workflow comprises:
 Contains the scripts to train surrogate models that estimate the **quantitative values of small-signal stability performance indicators**.
 The training pipeline follows a similar structure:
 
-* Data cleaning
-* Feature engineering
+* Apply data cleaning and feature engineering
 * Initial model screening
 * Feature selection using **permutation feature importance**
 * Final model training
 
+**Note:** Running the full workflow may produce results that differ from those reported in the paper due to the inherent randomness in the models used (e.g., clustering, classifiers, regressors, permutation feature importance). To facilitate reproducibility, the models trained in the paper with the selected features are provided with the suffix `_paper`.
 
-
-
+To reproduce the exact results from the paper when running the data-driven decision-making algorithm, set the parameter `reproduce_paper=True`.
 
 
 ## References
