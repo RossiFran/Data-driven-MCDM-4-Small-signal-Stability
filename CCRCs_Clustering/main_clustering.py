@@ -39,6 +39,7 @@ from utils import *
 
 from create_df import *
 from clustering_functions import *
+from data_preprocessing import *
 #%%
 
 plt.rcParams.update({"figure.figsize" : [8, 6],
@@ -57,8 +58,7 @@ plt.rcParams.update({"figure.figsize" : [8, 6],
 
 
 #%%
-#TODO complete:
-#Read the list of CCRCs: 1:  ; 2:   ; 3:
+#Read the list of CCRCs: 1: AC-GFM ; 2: DC-GFM; 3: GFL
 exec(open('../Settings/combinations.sav').read())
 
 indicators_list=['H2_vdc','DCgain_vdc','H2_freq','DCgain_freq']
@@ -81,17 +81,17 @@ df_X_PF_IPC=pd.concat([df_X_PF,df_X_IPC],axis=1).reset_index(drop=True)
 
 n_powerflows = len(df_X_PF)
 
+#%% ---- DATA PREPROCESSING AND PCA ----
+X = preprocess_data(df_X_PF_IPC)
+
+n_intervals=5
+df_X_PCA, x_list, y_list, z_list = PCA_cluster(X, n_intervals, plot=True)
+
+#%%
 for indicator in indicators_list:
     
     df_pf_ind = PFs_x_CCRCs(n_powerflows, indicator, combinations, path_data)
-    
-    #%% ---- DATA PREPROCESSING AND PCA ----
-    X = preprocess_data(df_X_PF_IPC)
-    
-    n_intervals=5
-    df_X_PCA, x_list, y_list, z_list = PCA_cluster(X, n_intervals)#, plot=True)
-    
-       
+            
     #%%
     df_CCRs_PF_ind = df_1st_exploration(df_X_PF_IPC, np.arange(1,len(combinations)+1), combinations, n_powerflows, path_data, True)
     
@@ -133,8 +133,8 @@ for indicator in indicators_list:
     
     #%% ---- #REARRANGE ATTRIBUTE MATRIX ----
     
-    complete_heat_map_rearranged = Rearranged_Attribute_Matrix(df_pf_ind_levels, heatmap, np.arange(0, n_clusters), labels)#, plot=True ,indicators_plot_labels=indicators_plot_labels, indicator=indicator, save_plot=True)
-    reduced_heat_map_rearranged = Rearranged_Attribute_Matrix(df_pf_ind_levels, heatmap, selected_clusters_unique, labels)#, plot=True ,indicators_plot_labels=indicators_plot_labels, indicator=indicator, type_matrix='_reduced', save_plot=True)
+    complete_heat_map_rearranged = Rearranged_Attribute_Matrix(df_pf_ind_levels, heatmap, np.arange(0, n_clusters), labels, plot=True ,indicators_plot_labels=indicators_plot_labels, indicator=indicator, save_plot=True)
+    reduced_heat_map_rearranged = Rearranged_Attribute_Matrix(df_pf_ind_levels, heatmap, selected_clusters_unique, labels, plot=True ,indicators_plot_labels=indicators_plot_labels, indicator=indicator, type_matrix='_reduced', save_plot=True)
 
 #%% ---- APPLY SET INTERSECTION ----
 
