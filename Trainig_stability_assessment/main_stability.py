@@ -89,19 +89,10 @@ scorer = set_scorer(df)
 #%% DATA PREPROCESSING
 
 #TODO: fix this in the files
-df.rename(columns = {'P2l':'Pl2', 'P5l':'Pl5', 'P9l':'Pl9','Q2l':'Ql2', 'Q5l':'Ql5', 'Q9l':'Ql9'}, inplace = True)
+# df.rename(columns = {'P2l':'Pl2', 'P5l':'Pl5', 'P9l':'Pl9','Q2l':'Ql2', 'Q5l':'Ql5', 'Q9l':'Ql9'}, inplace = True)
 df = df.drop(indicators_list, axis=1)
 
-df = pu_conversion(df)
-
-df = features_creation(df)
-
-columns_I, columns_PQ, columns_V, columns_vd, columns_vq, columns_id, columns_iq, columns_P, columns_Q = group_columns()
-
-columns_remove, rows_remove = data_clean_results()
-
-df = final_df(df,columns_remove,rows_remove)
-
+df = preprocess_data(df)
 
 #%% TRAIN-TEST SPLIT
 

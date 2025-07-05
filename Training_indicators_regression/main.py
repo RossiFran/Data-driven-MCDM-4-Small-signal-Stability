@@ -78,19 +78,13 @@ df=pd.read_csv(path_data+filename).drop('Unnamed: 0',axis=1)
 
 #%% DATA PREPROCESSING
 
-#TODO: fix this in the files
-df.rename(columns = {'P2l':'Pl2', 'P5l':'Pl5', 'P9l':'Pl9','Q2l':'Ql2', 'Q5l':'Ql5', 'Q9l':'Ql9'}, inplace = True)
+##TODO: fix this in the files
+# df.rename(columns = {'P2l':'Pl2', 'P5l':'Pl5', 'P9l':'Pl9','Q2l':'Ql2', 'Q5l':'Ql5', 'Q9l':'Ql9'}, inplace = True)
+df_inputs = df.drop(indicators_list+['Stable'], axis=1)
 
-df = pu_conversion(df)
+df_inputs= preprocess_data(df_inputs)
 
-df = features_creation(df)
-
-columns_I, columns_PQ, columns_V, columns_vd, columns_vq, columns_id, columns_iq, columns_P, columns_Q = group_columns()
-
-columns_remove, rows_remove = data_clean_results()
-columns_remove=columns_remove-set(['Combination'])
-
-df = final_df(df,columns_remove,rows_remove)
+df=pd.concat([df_inputs,df[indicators_list+['Stable']]],axis=1)
 
 #%% Take only stable cases
 df_stab=df.query('Stable==1')

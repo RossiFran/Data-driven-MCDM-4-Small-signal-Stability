@@ -1,24 +1,246 @@
+import pandas as pd
+from sklearn.preprocessing import StandardScaler
 import numpy as np
+#%%
+
+def preprocess_data(df_X_PF_IPC):
+    #TODO: fix this in the files
+    df_X_PF_IPC.rename(columns = {'P2l':'Pl2', 'P5l':'Pl5', 'P9l':'Pl9','Q2l':'Ql2', 'Q5l':'Ql5', 'Q9l':'Ql9'}, inplace = True)
+    
+    Sb, Vb, Fb, Ib, Zb, Wb = system_bases()
+    
+    columns_V, columns_PQ, columns_I = group_columns(df_X_PF_IPC)
+
+    columns_remove = set()
+    rows_remove = set()
+    #% Cnversion in p.u.
+    for v in columns_V:
+        df_X_PF_IPC[v+'_pu'] = df_X_PF_IPC[v].apply(lambda x: x/Vb)
+    for v in columns_PQ:
+        df_X_PF_IPC[v+'_pu'] = df_X_PF_IPC[v].apply(lambda x: x/Sb)
+    for v in columns_I:
+        df_X_PF_IPC[v+'_pu'] = df_X_PF_IPC[v].apply(lambda x: x/Ib)
+        
+    # Remove non p.u. columns
+    for c in columns_V:
+        remove_columns(columns_remove,[c])
+    for c in columns_PQ:
+        remove_columns(columns_remove,[c])
+    for c in columns_I:
+        remove_columns(columns_remove,[c])
+        
+    # data clean
+    remove_columns(columns_remove,['Powerflow'])
+
+    # Remove _c_ columns
+    removed_c_ = []
+    for c in df_X_PF_IPC:
+        if '_c_' in c:
+            remove_columns(columns_remove,[c])
+            removed_c_.append(c)
+
+    removed_only1val = []
+    # Remove columns with only 1 value
+    for c in df_X_PF_IPC:
+        if df_X_PF_IPC[c].unique().size == 1:
+            remove_columns(columns_remove,[c])
+            removed_only1val.append(c)
+        
+    removed_duplicated = []
+    # Remove duplicated columns
+    for c in df_X_PF_IPC.columns[df_X_PF_IPC.columns.duplicated()]:
+        remove_columns(columns_remove,[c])
+        removed_duplicated.append(c)
+        
+    # Remove correlated columns  
+    correlated_features = get_correlated_columns(final_df(df_X_PF_IPC,columns_remove,set()))      
+    removed_correlated = []
+    
+    for var in correlated_features:
+        var_node=[None, None]
+        var_type=[None, None]
+        # P Pdc, Q, i isum, V, v vDC vsum, theta, etheta 
+        type_priorities=['P','Q','i','V','v','t','e']
+        always_conserve=['P','Q']
+        mmc_nodes=[2,4,6,5,9,10]
+        th_nodes=[1,8]
+        g_nodes=[3,6,11]
+
+        var_priority=[None, None]
+    
+        for i, v in enumerate(var):
+            #type
+            var_type[i]=v[0]
+    
+            #node
+            if 'mmc' in v: #mmc
+                var_node[i] = mmc_nodes[int(v[v.index('mmc')+3])-1]
+            elif 'dc' in v: #dc associated to mmc
+                var_node[i] = mmc_nodes[int(v[v.index('dc')-1])-1]
+            elif ('th' in v) and not ('theta' in v): #thevenin
+                var_node[i] = th_nodes[int(v[v.index('th')+2])-1]
+            elif ('g' in v) and not ('ang' in v): #generator
+                var_node[i] = g_nodes[int(v[v.index('g')+1])-1]
+            elif '_pu' in v: #variable in pu
+                var_node[i] = int(v[-4])
+            else:
+                var_node[i] = int(v[-1])
+                                
+            #priority
+            if var_type[i] in always_conserve:
+                var_priority[i]=0
+            else:
+                var_priority[i]=type_priorities.index(var_type[i])
+            
+    
+        if var_node[0] != var_node[1]: # don't remove different nodes
+            continue
+    
+        if var_priority[0]==0 and var_priority[1]==0: #priority 0 == don't remove
+            continue
+    
+        if var_priority[0] < var_priority[1]: # remove variable with highest priority
+            remove_columns(columns_remove,[var[1]])
+            removed_correlated.append(var[1])
+        else:
+            remove_columns(columns_remove,[var[0]])
+            removed_correlated.append(var[0])
+
+    # Modulo vq vd y theta
+    columns_vq = final_df(df_X_PF_IPC,columns_remove,set()).columns[final_df(df_X_PF_IPC,columns_remove,set()).columns.str.startswith('vq0') +
+                                      final_df(df_X_PF_IPC,columns_remove,set()).columns.str.startswith('vdiffq0') +
+                                      final_df(df_X_PF_IPC,columns_remove,set()).columns.str.startswith('vnq0')].tolist()
+    columns_vd = final_df(df_X_PF_IPC,columns_remove,set()).columns[final_df(df_X_PF_IPC,columns_remove,set()).columns.str.startswith('vd0') +
+                                      final_df(df_X_PF_IPC,columns_remove,set()).columns.str.startswith('vdiffd0') +
+                                      final_df(df_X_PF_IPC,columns_remove,set()).columns.str.startswith('vnd0')].tolist()
+
+    # Make sure it exists vd0 for each vq0
+    for vq in columns_vq:
+        index_q = vq.find('q0')
+        vq_to_d = vq[:index_q]+'d'+vq[index_q+1:]
+        # vq_to_d = vq[:1] + 'd' + vq[1+1:]
+        if vq_to_d in columns_vd:
+            feature_creation_2var(df_X_PF_IPC, vq, vq_to_d, relation='module', id_name='v'+vq[index_q+2:])
+            # theta = atan(d/q)
+            feature_creation_2var(df_X_PF_IPC, vq_to_d, vq, relation='angle', id_name='v'+vq[index_q+2:])
+            
+    for e in columns_vq:
+        remove_columns(columns_remove,[e])
+    for e in columns_vd:
+        remove_columns(columns_remove,[e])
+        
+        
+    # Modulo iq id y theta
+    columns_iq = final_df(df_X_PF_IPC,columns_remove,set()).columns[final_df(df_X_PF_IPC,columns_remove,set()).columns.str.startswith('iq0') +
+                                      final_df(df_X_PF_IPC,columns_remove,set()).columns.str.startswith('idiffq0') +
+                                      final_df(df_X_PF_IPC,columns_remove,set()).columns.str.startswith('inq0')].tolist()
+    columns_id = final_df(df_X_PF_IPC,columns_remove,set()).columns[final_df(df_X_PF_IPC,columns_remove,set()).columns.str.startswith('id0') +
+                                      final_df(df_X_PF_IPC,columns_remove,set()).columns.str.startswith('idiffd0') +
+                                      final_df(df_X_PF_IPC,columns_remove,set()).columns.str.startswith('ind0')].tolist()
+
+    # Make sure it exists id0 for each iq0
+    for iq in columns_iq:
+        index_q = iq.find('q0')
+        iq_to_d = iq[:index_q]+'d'+iq[index_q+1:]
+        if iq_to_d in columns_id:
+            feature_creation_2var(df_X_PF_IPC, iq, iq_to_d, relation='module', id_name='i'+iq[index_q+2:])
+            feature_creation_2var(df_X_PF_IPC, iq_to_d, iq, relation='angle', id_name='i'+iq[index_q+2:])
+            
+    for e in columns_iq:
+        remove_columns(columns_remove,[e])
+    for e in columns_id:
+        remove_columns(columns_remove,[e])
+        
+        
+    # Potencia aparente
+    columns_P = final_df(df_X_PF_IPC,columns_remove,set()).columns[final_df(df_X_PF_IPC,columns_remove,set()).columns.str.startswith('P')].tolist()
+    columns_Q = final_df(df_X_PF_IPC,columns_remove,set()).columns[final_df(df_X_PF_IPC,columns_remove,set()).columns.str.startswith('Q')].tolist()
+    # Make sure it exists P for each Q
+    for P in columns_P:
+        P_to_Q = 'Q' + P[1:]
+        if P_to_Q in columns_Q:
+            feature_creation_2var(df_X_PF_IPC, P, P_to_Q, relation='module', id_name='S'+P[1:])
 
 
-def group_columns():
-    columns_I=['iq0_1', 'id0_1', 'iq0c_1', 'id0c_1', 'iq0_2', 'id0_2', 'iq0c_2', 'id0c_2', 'iq0_3', 'id0_3', 'iq0c_3', 'id0c_3', 'iq0_4', 'id0_4', 'iq0c_4', 'id0c_4', 'iq0_5', 'id0_5', 'iq0c_5', 'id0c_5', 'iq0_6', 'id0_6', 'iq0c_6', 'id0c_6', 'iq0_7', 'id0_7', 'iq0c_7', 'id0c_7', 'idiffq0_mmc1', 'idiffd0_mmc1', 'idiffq0_c_mmc1', 'idiffd0_c_mmc1', 'isum0_mmc1', 'idiffq0_mmc2', 'idiffd0_mmc2', 'idiffq0_c_mmc2', 'idiffd0_c_mmc2', 'isum0_mmc2', 'idiffq0_mmc3', 'idiffd0_mmc3', 'idiffq0_c_mmc3', 'idiffd0_c_mmc3', 'isum0_mmc3', 'idiffq0_mmc4', 'idiffd0_mmc4', 'idiffq0_c_mmc4', 'idiffd0_c_mmc4', 'isum0_mmc4', 'idiffq0_mmc5', 'idiffd0_mmc5', 'idiffq0_c_mmc5', 'idiffd0_c_mmc5', 'isum0_mmc5', 'idiffq0_mmc6', 'idiffd0_mmc6', 'idiffq0_c_mmc6', 'idiffd0_c_mmc6', 'isum0_mmc6', 'iq0_th1', 'id0_th1', 'iq0_th2', 'id0_th2']
-    columns_PQ=['Pth1', 'Pmmc1', 'Pg1', 'Pmmc2', 'Pmmc4', 'Pmmc3', 'Pl7', 'Pth2', 'Pmmc6', 'Pmmc5', 'Pg3', 'Pg2', 'Pl2', 'Pl5', 'Pl9', 'Qth1', 'Qmmc1', 'Qg1', 'Qmmc2', 'Qmmc4', 'Qmmc3', 'Ql7', 'Qth2', 'Qmmc6', 'Qmmc5', 'Qg3', 'Qg2', 'Ql2', 'Ql5', 'Ql9', 'P1dc', 'P2dc', 'P3dc', 'P4dc', 'P5dc', 'P6dc', 'P_1', 'Q_1', 'P_2', 'Q_2', 'P_3', 'Q_3', 'P_4', 'Q_4', 'P_5', 'Q_5', 'P_6', 'Q_6', 'P_7', 'Q_7']
-    columns_V=['V1', 'V2', 'V3', 'V4', 'V5', 'V6', 'V7', 'V8', 'V9', 'V10', 'V11', 'V1dc', 'V2dc', 'V3dc', 'V4dc', 'V5dc', 'V6dc', 'vq0_1', 'vd0_1', 'vq0c_1', 'vd0c_1', 'vq0_2', 'vd0_2', 'vq0c_2', 'vd0c_2', 'vq0_3', 'vd0_3', 'vq0c_3', 'vd0c_3', 'vq0_4', 'vd0_4', 'vq0c_4', 'vd0c_4', 'vq0_5', 'vd0_5', 'vq0c_5', 'vd0c_5', 'vq0_6', 'vd0_6', 'vq0c_6', 'vd0c_6', 'vq0_7', 'vd0_7', 'vq0c_7', 'vd0c_7', 'vnq0_mmc1', 'vnd0_mmc1', 'vnq0_c_mmc1', 'vnd0_c_mmc1', 'vdiffq0_mmc1', 'vdiffd0_mmc1', 'vdiffq0_c_mmc1', 'vdiffd0_c_mmc1', 'vsum0_mmc1', 'vDC0_mmc1', 'vnq0_mmc2', 'vnd0_mmc2', 'vnq0_c_mmc2', 'vnd0_c_mmc2', 'vdiffq0_mmc2', 'vdiffd0_mmc2', 'vdiffq0_c_mmc2', 'vdiffd0_c_mmc2', 'vsum0_mmc2', 'vDC0_mmc2', 'vnq0_mmc3', 'vnd0_mmc3', 'vnq0_c_mmc3', 'vnd0_c_mmc3', 'vdiffq0_mmc3', 'vdiffd0_mmc3', 'vdiffq0_c_mmc3', 'vdiffd0_c_mmc3', 'vsum0_mmc3', 'vDC0_mmc3', 'vnq0_mmc4', 'vnd0_mmc4', 'vnq0_c_mmc4', 'vnd0_c_mmc4', 'vdiffq0_mmc4', 'vdiffd0_mmc4', 'vdiffq0_c_mmc4', 'vdiffd0_c_mmc4', 'vsum0_mmc4', 'vDC0_mmc4', 'vnq0_mmc5', 'vnd0_mmc5', 'vnq0_c_mmc5', 'vnd0_c_mmc5', 'vdiffq0_mmc5', 'vdiffd0_mmc5', 'vdiffq0_c_mmc5', 'vdiffd0_c_mmc5', 'vsum0_mmc5', 'vDC0_mmc5', 'vnq0_mmc6', 'vnd0_mmc6', 'vnq0_c_mmc6', 'vnd0_c_mmc6', 'vdiffq0_mmc6', 'vdiffd0_mmc6', 'vdiffq0_c_mmc6', 'vdiffd0_c_mmc6', 'vsum0_mmc6', 'vDC0_mmc6', 'vq0_th1', 'vd0_th1', 'vq0_th2', 'vd0_th2']
-    columns_vd=['vd0_1_pu', 'vd0_2_pu', 'vd0_3_pu', 'vd0_4_pu', 'vd0_5_pu', 'vd0_6_pu', 'vnd0_mmc1_pu', 'vdiffd0_mmc1_pu', 'vnd0_mmc2_pu', 'vdiffd0_mmc2_pu', 'vnd0_mmc3_pu', 'vdiffd0_mmc3_pu', 'vnd0_mmc4_pu', 'vdiffd0_mmc4_pu', 'vnd0_mmc6_pu', 'vdiffd0_mmc6_pu']
-    columns_vq=['vq0_1_pu', 'vq0_2_pu', 'vq0c_2_pu', 'vq0_3_pu', 'vq0_4_pu', 'vq0c_4_pu', 'vq0_5_pu', 'vq0c_5_pu', 'vq0_6_pu', 'vq0_7_pu', 'vq0c_7_pu', 'vnq0_mmc1_pu', 'vdiffq0_mmc1_pu', 'vnq0_mmc2_pu', 'vdiffq0_mmc2_pu', 'vnq0_mmc3_pu', 'vdiffq0_mmc3_pu', 'vnq0_mmc4_pu', 'vdiffq0_mmc4_pu', 'vnq0_mmc5_pu', 'vnq0_mmc6_pu', 'vdiffq0_mmc6_pu']
-    columns_id=['id0_1_pu', 'id0_2_pu', 'id0_3_pu', 'id0_4_pu', 'id0_5_pu', 'id0c_5_pu', 'id0_6_pu', 'id0_7_pu', 'idiffd0_mmc1_pu', 'idiffd0_mmc2_pu', 'idiffd0_mmc3_pu', 'idiffd0_mmc4_pu', 'idiffd0_mmc6_pu', 'id0_th1_pu', 'id0_th2_pu']
-    columns_iq=['iq0_1_pu', 'iq0_2_pu', 'iq0_3_pu', 'iq0_4_pu', 'iq0_5_pu', 'iq0_6_pu', 'idiffq0_mmc1_pu', 'idiffq0_mmc2_pu', 'idiffq0_mmc3_pu', 'idiffq0_mmc4_pu', 'idiffq0_mmc6_pu', 'iq0_th1_pu', 'iq0_th2_pu']
-    columns_P=['Pth1_pu', 'Pmmc1_pu', 'Pg1_pu', 'Pmmc2_pu', 'Pmmc4_pu', 'Pmmc3_pu', 'Pl7_pu', 'Pth2_pu', 'Pmmc6_pu', 'Pmmc5_pu', 'Pg3_pu', 'Pg2_pu', 'Pl2_pu', 'Pl5_pu', 'Pl9_pu', 'P1dc_pu', 'P2dc_pu', 'P3dc_pu', 'P4dc_pu', 'P5dc_pu', 'P6dc_pu', 'P_1_pu', 'P_2_pu', 'P_3_pu', 'P_4_pu', 'P_5_pu', 'P_6_pu', 'P_7_pu']
-    columns_Q=['Qth1_pu', 'Qmmc1_pu', 'Qg1_pu', 'Qmmc2_pu', 'Qmmc4_pu', 'Qmmc3_pu', 'Ql7_pu', 'Qth2_pu', 'Qmmc6_pu', 'Qmmc5_pu', 'Qg3_pu', 'Qg2_pu', 'Ql2_pu', 'Ql5_pu', 'Ql9_pu', 'Q_1_pu', 'Q_2_pu', 'Q_3_pu', 'Q_4_pu', 'Q_5_pu', 'Q_6_pu', 'Q_7_pu']
+     # Categorical features   
+    categorical = {'lt 0': lambda x: x < 0}
 
-    return columns_I, columns_PQ, columns_V, columns_vd, columns_vq, columns_id, columns_iq, columns_P, columns_Q
+    for v in columns_P:
+        df_X_PF_IPC[v+' lt 0'] = df_X_PF_IPC[v].apply(lambda x: x<0)
+        df_X_PF_IPC['abs_'+v] = abs(df_X_PF_IPC[v])
 
-def data_clean_results():
-    columns_remove={'vnd0_mmc4', 'V4dc', 'idiffd0_mmc6_pu', 'iq0_2', 'vdiffq0_mmc2_pu', 'vq0_th1_pu', 'vd0c_4_pu', 'id0c_6_pu', 'iq0c_1_pu', 'vDC0_mmc3', 'id0c_2_pu', 'vd0c_2', 'Qmmc3', 'vdiffd0_c_mmc1_pu', 'id0_7', 'V6dc_pu', 'idiffd0_c_mmc6_pu', 'vdiffd0_mmc5_pu', 'P_6', 'vq0c_7', 'vd0_th1', 'idiffd0_mmc4_pu', 'Qmmc4', 'vdiffq0_mmc2', 'vsum0_mmc2', 'idiffq0_c_mmc5', 'V2_pu', 'idiffq0_mmc2_pu', 'id0c_6', 'vd0_6_pu', 'P1dc', 'etheta0_2', 'vnd0_mmc5_pu', 'vdiffq0_c_mmc3_pu', 'vdiffd0_c_mmc3', 'isum0_mmc6', 'vdiffq0_c_mmc1_pu', 'Ql2', 'vq0_th1', 'etheta0_1', 'vq0c_1', 'vnd0_c_mmc5', 'iq0c_5', 'V1dc_pu', 'vd0c_5_pu', 'vq0c_1_pu', 'idiffd0_c_mmc5', 'P2dc', 'theta8', 'vDC0_mmc2', 'is_boundary', 'theta1', 'idiffd0_mmc3', 'vnq0_mmc1', 'vdiffd0_mmc1', 'vq0c_5', 'etheta0_3', 'Pmmc3', 'vDC0_mmc6', 'isum0_mmc4', 'V9_pu', 'vd0c_3_pu', 'vdiffq0_mmc4_pu', 'id0c_7_pu', 'vDC0_mmc4_pu', 'vq0_3', 'vdiffd0_c_mmc5_pu', 'iq0c_4', 'vdiffq0_mmc3_pu', 'P_2', 'vdiffd0_c_mmc6_pu', 'Pg3', 'vdiffq0_c_mmc4_pu', 'idiffq0_c_mmc6', 'etheta0_mmc6', 'idiffq0_c_mmc2', 'V3dc', 'vdiffq0_c_mmc4', 'vq0_6_pu', 'iq0_5', 'Qmmc5', 'vdiffd0_c_mmc4', 'iq0_2_pu', 'vd0c_6_pu', 'idiffd0_c_mmc2', 'iq0c_6', 'vq0c_4', 'vDC0_mmc4', 'vsum0_mmc6_pu', 'vd0_2_pu', 'V5dc_pu', 'vdiffq0_mmc4', 'id0c_3', 'idiffd0_mmc2_pu', 'vdiffd0_mmc3', 'P6dc', 'iq0c_7_pu', 'idiffq0_mmc1_pu', 'idiffd0_c_mmc6', 'Q_1', 'vdiffq0_mmc5', 'vd0_1', 'idiffq0_mmc1', 'iq0_6', 'idiffd0_mmc5', 'Pl5', 'vdiffd0_c_mmc2', 'vDC0_mmc3_pu', 'vnd0_mmc3', 'vnq0_c_mmc4', 'vdiffd0_mmc2', 'vdiffq0_c_mmc6_pu', 'iq0_3_pu', 'vdiffd0_c_mmc3_pu', 'vsum0_mmc4_pu', 'idiffd0_c_mmc2_pu', 'idiffq0_mmc5_pu', 'vd0c_1_pu', 'Qmmc6', 'vdiffq0_mmc5_pu', 'vsum0_mmc3_pu', 'id0_th2', 'V5', 'V4dc_pu', 'idiffq0_c_mmc3_pu', 'vsum0_mmc6', 'idiffq0_mmc4', 'vd0_3_pu', 'vnq0_c_mmc6_pu', 'vnq0_c_mmc2_pu', 'vd0c_7', 'vsum0_mmc2_pu', 'vnq0_mmc4', 'vd0c_3', 'vnd0_c_mmc6_pu', 'Qg3', 'vq0c_6', 'iq0_th1_pu', 'vd0_5_pu', 'vnd0_c_mmc3_pu', 'idiffd0_c_mmc3', 'vnq0_c_mmc4_pu', 'etheta0_mmc4', 'vdiffd0_c_mmc2_pu', 'vnq0_mmc3', 'idiffd0_mmc1_pu', 'etheta0_4', 'vd0_5', 'id0_7_pu', 'V2dc_pu', 'vdiffq0_c_mmc5', 'vnq0_mmc6_pu', 'vd0_1_pu', 'vdiffq0_c_mmc2', 'iq0c_7', 'vnd0_c_mmc2', 'vq0_3_pu', 'vDC0_mmc6_pu', 'vdiffq0_c_mmc2_pu', 'vDC0_mmc1', 'Q_3', 'etheta0_mmc1', 'idiffd0_mmc1', 'id0c_7', 'V3dc_pu', 'vsum0_mmc4', 'iq0c_3_pu', 'vnd0_mmc3_pu', 'vdiffd0_c_mmc6', 'iq0_4', 'iq0c_2', 'vnq0_mmc5', 'id0_6', 'iq0_th2_pu', 'V2', 'vnd0_c_mmc1', 'vd0_4_pu', 'id0_th1', 'iq0_5_pu', 'vd0c_6', 'P4dc', 'vsum0_mmc5_pu', 'vq0_6', 'vq0c_7_pu', 'vnd0_mmc1', 'idiffd0_mmc2', 'vq0c_2', 'vdiffq0_mmc6_pu', 'iq0_3', 'V7', 'V1dc', 'vq0_2', 'vd0_7_pu', 'etheta0_6', 'id0c_5', 'vdiffd0_mmc6', 'vdiffd0_mmc3_pu', 'idiffd0_c_mmc5_pu', 'vd0_6', 'iq0_7', 'idiffq0_mmc6', 'idiffq0_mmc5', 'idiffq0_mmc6_pu', 'Q_5', 'vq0c_2_pu', 'id0_4_pu', 'vdiffd0_c_mmc5', 'isum0_mmc5', 'vnd0_c_mmc3', 'vnq0_mmc6', 'vq0_2_pu', 'id0_1_pu', 'vsum0_mmc1_pu', 'idiffq0_mmc3_pu', 'iq0_1_pu', 'vnq0_c_mmc1_pu', 'vdiffd0_mmc2_pu', 'vnq0_c_mmc2', 'V5_pu', 'vnd0_mmc2_pu', 'Pl2', 'vnd0_mmc6', 'idiffq0_c_mmc3', 'id0_2', 'iq0c_1', 'vdiffd0_c_mmc1', 'Combination', 'V4', 'idiffd0_c_mmc4', 'vnq0_mmc2_pu', 'vnq0_mmc3_pu', 'vd0_th2', 'id0c_5_pu', 'vdiffq0_c_mmc6', 'vq0c_5_pu', 'vnd0_mmc6_pu', 'id0c_4_pu', 'Pth2', 'vq0_4_pu', 'etheta0_mmc2', 'vq0_th2_pu', 'V1', 'isum0_mmc1', 'vnd0_c_mmc1_pu', 'V8', 'vq0_th2', 'vdiffq0_c_mmc1', 'vnq0_c_mmc3_pu', 'vnq0_mmc1_pu', 'id0_5_pu', 'id0_th2_pu', 'id0_5', 'id0c_1', 'iq0_1', 'idiffq0_c_mmc6_pu', 'id0c_2', 'iq0_th2', 'vd0_7', 'vd0c_4', 'vnd0_c_mmc2_pu', 'vnq0_c_mmc1', 'vdiffq0_mmc3', 'idiffd0_c_mmc3_pu', 'id0_th1_pu', 'vnq0_c_mmc5', 'vd0_4', 'vd0c_1', 'V4_pu', 'id0c_3_pu', 'vnd0_c_mmc4_pu', 'Qmmc1', 'V2dc', 'idiffq0_c_mmc5_pu', 'idiffq0_mmc4_pu', 'Pl7', 'Pmmc6', 'P5dc', 'vq0c_3_pu', 'iq0c_6_pu', 'vdiffq0_c_mmc5_pu', 'Ql9', 'vsum0_mmc3', 'Pmmc5', 'vnd0_mmc2', 'id0_4', 'V11', 'idiffd0_c_mmc4_pu', 'vnd0_c_mmc5_pu', 'vq0_1', 'idiffd0_mmc3_pu', 'vnd0_c_mmc4', 'idiffq0_c_mmc4_pu', 'vdiffq0_mmc6', 'Pmmc4', 'etheta0_5', 'P_4', 'vq0_1_pu', 'vnq0_mmc5_pu', 'V10', 'Qg1', 'iq0c_5_pu', 'vd0c_7_pu', 'vnq0_c_mmc5_pu', 'Pg2', 'idiffq0_c_mmc1', 'idiffd0_c_mmc1', 'idiffq0_mmc2', 'Q_6', 'Pmmc2', 'vd0_2', 'vDC0_mmc5', 'vd0_th1_pu', 'vdiffq0_c_mmc3', 'id0_3_pu', 'P_3', 'vq0_5', 'idiffq0_c_mmc1_pu', 'vdiffq0_mmc1', 'vdiffd0_mmc4_pu', 'vnd0_mmc5', 'idiffd0_mmc6', 'idiffd0_c_mmc1_pu', 'vnq0_c_mmc3', 'id0_2_pu', 'iq0_7_pu', 'P_5', 'vdiffd0_mmc5', 'IPCF', 'idiffq0_c_mmc2_pu', 'vDC0_mmc2_pu', 'vq0_7', 'Powerflow', 'vd0c_5', 'vdiffd0_mmc4', 'V6dc', 'vnd0_mmc1_pu', 'vsum0_mmc1', 'Ql5', 'vd0_3', 'Qmmc2', 'vnq0_mmc4_pu', 'vdiffd0_mmc1_pu', 'theta11', 'vq0_7_pu', 'vDC0_mmc1_pu', 'P_1', 'V6', 'vdiffq0_mmc1_pu', 'vDC0_mmc5_pu', 'P3dc', 'id0_1', 'vsum0_mmc5', 'id0c_1_pu', 'iq0c_2_pu', 'vnd0_mmc4_pu', 'Q_2', 'etheta0_mmc3', 'idiffd0_mmc5_pu', 'vnd0_c_mmc6', 'vq0_5_pu', 'vdiffd0_mmc6_pu', 'Qth1', 'id0c_4', 'etheta0_7', 'iq0c_3', 'idiffq0_c_mmc4', 'vq0c_6_pu', 'vq0c_3', 'V9', 'Pth1', 'Qg2', 'Ql7', 'iq0_th1', 'vnq0_mmc2', 'id0_3', 'Qth2', 'iq0_6_pu', 'V5dc', 'Pmmc1', 'idiffd0_mmc4', 'vdiffd0_c_mmc4_pu', 'id0_6_pu', 'iq0c_4_pu', 'P_7', 'Pg1', 'etheta0_mmc5', 'vd0_th2_pu', 'Q_7', 'Q_4', 'Pl9', 'idiffq0_mmc3', 'V3', 'vnq0_c_mmc6', 'vq0_4', 'V10_pu', 'vq0c_4_pu', 'isum0_mmc2', 'isum0_mmc3', 'vd0c_2_pu', 'iq0_4_pu'}
-    rows_remove=set()
-    return columns_remove, rows_remove
+    for v in columns_Q:
+        df_X_PF_IPC[v+' lt 0'] = df_X_PF_IPC[v].apply(lambda x: x<0)
+        df_X_PF_IPC['abs_'+v] = abs(df_X_PF_IPC[v])
 
+
+    
+    
+    X = final_df(df_X_PF_IPC,columns_remove,rows_remove)
+        
+    return X
+
+def group_columns(df):
+    columns_V =  df.columns[df.columns.str.startswith('V')+ df.columns.str.startswith('v')].tolist()
+    columns_PQ = df.drop('Powerflow',axis=1, errors='ignore').columns[df.drop('Powerflow',axis=1, errors='ignore').columns.str.startswith('P') + df.drop('Powerflow',axis=1, errors='ignore').columns.str.startswith('Q')].tolist()
+    columns_I = df.columns[df.columns.str.startswith('i')].tolist()
+
+    return columns_V, columns_PQ, columns_I
+
+def feature_creation_2var(df, var1, var2, relation='module', id_tag=None, id_name=None):
+    
+    name = var1+'_'+var2 if id_name=='' else id_name
+    func = None
+    tag = ''
+    
+    # if relation[:9]=='sumofpow_':
+    #     tag = 'sop'+str(n)+'_' if id_tag==None else id_tag
+    #     n = int(relation[9:])
+    #     func = lambda x1,x2: np.power(x1,n) + np.power(x2,n)
+    
+    if relation=='module':
+        tag = 'mod_' if id_tag==None else id_tag
+        func = lambda x1,x2: np.sqrt(np.power(x1,2) + np.power(x2,2))
+    
+    elif relation=='angle':
+        tag = 'ang_' if id_tag==None else id_tag
+        func = lambda x1,x2: np.arctan(x1/x2)
+        
+    elif relation=='circle':
+        tag = 'circ_' if id_tag==None else id_tag
+        func = lambda x1,x2: np.sqrt(np.power(x1,2) + np.power(x2,2))
+        
+    elif relation=='oblique' or relation=='sum':
+        tag = 'sum_' if id_tag==None else id_tag
+        func = lambda x1,x2: x1 + x2
+        
+    elif relation=='quadrants':
+        tag = 'prod_' if id_tag==None else id_tag
+        func = lambda x1,x2: x1*x2
+     
+    df[tag+name] = func(df[var1], df[var2])
+    
+    return
+
+def remove_rows(rows_remove,*row_list): # Rows to remove from the df
+    rows_remove.update(row_list)
+def remove_columns(columns_remove,column_list): # Columns to remove from the df
+    columns_remove.update(column_list)
+
+def get_correlated_columns(df, c_threshold=0.999, method='pearson'):
+
+    correlated_features = []
+    correlation = df.corr(method=method)
+    for i in correlation.index:
+        for j in correlation:
+            if i!=j and abs(correlation.loc[i,j])>=c_threshold:
+                if tuple([j,i]) not in correlated_features:
+                    correlated_features.append(tuple([i,j]))
+                    
+    return correlated_features
+    
+def final_df(df,columns_remove,rows_remove): # Return final df (w/o removed columns and rows)
+    return df.drop(columns_remove, axis=1, errors='ignore').drop(rows_remove, axis=0, errors='ignore')
 
 def system_bases():
 	Sb=500e6
@@ -29,417 +251,3 @@ def system_bases():
 	Wb=2*np.pi*Fb
 	
 	return Sb, Vb, Fb, Ib, Zb, Wb 
-
-def pu_conversion(df):
-    Sb, Vb, Fb, Ib, Zb, Wb = system_bases()
-    
-    df['V1_pu'] = df['V1'].apply(lambda x: x/Vb)
-    df['V2_pu'] = df['V2'].apply(lambda x: x/Vb)
-    df['V3_pu'] = df['V3'].apply(lambda x: x/Vb)
-    df['V4_pu'] = df['V4'].apply(lambda x: x/Vb)
-    df['V5_pu'] = df['V5'].apply(lambda x: x/Vb)
-    df['V6_pu'] = df['V6'].apply(lambda x: x/Vb)
-    df['V7_pu'] = df['V7'].apply(lambda x: x/Vb)
-    df['V8_pu'] = df['V8'].apply(lambda x: x/Vb)
-    df['V9_pu'] = df['V9'].apply(lambda x: x/Vb)
-    df['V10_pu'] = df['V10'].apply(lambda x: x/Vb)
-    df['V11_pu'] = df['V11'].apply(lambda x: x/Vb)
-    df['V1dc_pu'] = df['V1dc'].apply(lambda x: x/Vb)
-    df['V2dc_pu'] = df['V2dc'].apply(lambda x: x/Vb)
-    df['V3dc_pu'] = df['V3dc'].apply(lambda x: x/Vb)
-    df['V4dc_pu'] = df['V4dc'].apply(lambda x: x/Vb)
-    df['V5dc_pu'] = df['V5dc'].apply(lambda x: x/Vb)
-    df['V6dc_pu'] = df['V6dc'].apply(lambda x: x/Vb)
-    df['vq0_1_pu'] = df['vq0_1'].apply(lambda x: x/Vb)
-    df['vd0_1_pu'] = df['vd0_1'].apply(lambda x: x/Vb)
-    df['vq0c_1_pu'] = df['vq0c_1'].apply(lambda x: x/Vb)
-    df['vd0c_1_pu'] = df['vd0c_1'].apply(lambda x: x/Vb)
-    df['vq0_2_pu'] = df['vq0_2'].apply(lambda x: x/Vb)
-    df['vd0_2_pu'] = df['vd0_2'].apply(lambda x: x/Vb)
-    df['vq0c_2_pu'] = df['vq0c_2'].apply(lambda x: x/Vb)
-    df['vd0c_2_pu'] = df['vd0c_2'].apply(lambda x: x/Vb)
-    df['vq0_3_pu'] = df['vq0_3'].apply(lambda x: x/Vb)
-    df['vd0_3_pu'] = df['vd0_3'].apply(lambda x: x/Vb)
-    df['vq0c_3_pu'] = df['vq0c_3'].apply(lambda x: x/Vb)
-    df['vd0c_3_pu'] = df['vd0c_3'].apply(lambda x: x/Vb)
-    df['vq0_4_pu'] = df['vq0_4'].apply(lambda x: x/Vb)
-    df['vd0_4_pu'] = df['vd0_4'].apply(lambda x: x/Vb)
-    df['vq0c_4_pu'] = df['vq0c_4'].apply(lambda x: x/Vb)
-    df['vd0c_4_pu'] = df['vd0c_4'].apply(lambda x: x/Vb)
-    df['vq0_5_pu'] = df['vq0_5'].apply(lambda x: x/Vb)
-    df['vd0_5_pu'] = df['vd0_5'].apply(lambda x: x/Vb)
-    df['vq0c_5_pu'] = df['vq0c_5'].apply(lambda x: x/Vb)
-    df['vd0c_5_pu'] = df['vd0c_5'].apply(lambda x: x/Vb)
-    df['vq0_6_pu'] = df['vq0_6'].apply(lambda x: x/Vb)
-    df['vd0_6_pu'] = df['vd0_6'].apply(lambda x: x/Vb)
-    df['vq0c_6_pu'] = df['vq0c_6'].apply(lambda x: x/Vb)
-    df['vd0c_6_pu'] = df['vd0c_6'].apply(lambda x: x/Vb)
-    df['vq0_7_pu'] = df['vq0_7'].apply(lambda x: x/Vb)
-    df['vd0_7_pu'] = df['vd0_7'].apply(lambda x: x/Vb)
-    df['vq0c_7_pu'] = df['vq0c_7'].apply(lambda x: x/Vb)
-    df['vd0c_7_pu'] = df['vd0c_7'].apply(lambda x: x/Vb)
-    df['vnq0_mmc1_pu'] = df['vnq0_mmc1'].apply(lambda x: x/Vb)
-    df['vnd0_mmc1_pu'] = df['vnd0_mmc1'].apply(lambda x: x/Vb)
-    df['vnq0_c_mmc1_pu'] = df['vnq0_c_mmc1'].apply(lambda x: x/Vb)
-    df['vnd0_c_mmc1_pu'] = df['vnd0_c_mmc1'].apply(lambda x: x/Vb)
-    df['vdiffq0_mmc1_pu'] = df['vdiffq0_mmc1'].apply(lambda x: x/Vb)
-    df['vdiffd0_mmc1_pu'] = df['vdiffd0_mmc1'].apply(lambda x: x/Vb)
-    df['vdiffq0_c_mmc1_pu'] = df['vdiffq0_c_mmc1'].apply(lambda x: x/Vb)
-    df['vdiffd0_c_mmc1_pu'] = df['vdiffd0_c_mmc1'].apply(lambda x: x/Vb)
-    df['vsum0_mmc1_pu'] = df['vsum0_mmc1'].apply(lambda x: x/Vb)
-    df['vDC0_mmc1_pu'] = df['vDC0_mmc1'].apply(lambda x: x/Vb)
-    df['vnq0_mmc2_pu'] = df['vnq0_mmc2'].apply(lambda x: x/Vb)
-    df['vnd0_mmc2_pu'] = df['vnd0_mmc2'].apply(lambda x: x/Vb)
-    df['vnq0_c_mmc2_pu'] = df['vnq0_c_mmc2'].apply(lambda x: x/Vb)
-    df['vnd0_c_mmc2_pu'] = df['vnd0_c_mmc2'].apply(lambda x: x/Vb)
-    df['vdiffq0_mmc2_pu'] = df['vdiffq0_mmc2'].apply(lambda x: x/Vb)
-    df['vdiffd0_mmc2_pu'] = df['vdiffd0_mmc2'].apply(lambda x: x/Vb)
-    df['vdiffq0_c_mmc2_pu'] = df['vdiffq0_c_mmc2'].apply(lambda x: x/Vb)
-    df['vdiffd0_c_mmc2_pu'] = df['vdiffd0_c_mmc2'].apply(lambda x: x/Vb)
-    df['vsum0_mmc2_pu'] = df['vsum0_mmc2'].apply(lambda x: x/Vb)
-    df['vDC0_mmc2_pu'] = df['vDC0_mmc2'].apply(lambda x: x/Vb)
-    df['vnq0_mmc3_pu'] = df['vnq0_mmc3'].apply(lambda x: x/Vb)
-    df['vnd0_mmc3_pu'] = df['vnd0_mmc3'].apply(lambda x: x/Vb)
-    df['vnq0_c_mmc3_pu'] = df['vnq0_c_mmc3'].apply(lambda x: x/Vb)
-    df['vnd0_c_mmc3_pu'] = df['vnd0_c_mmc3'].apply(lambda x: x/Vb)
-    df['vdiffq0_mmc3_pu'] = df['vdiffq0_mmc3'].apply(lambda x: x/Vb)
-    df['vdiffd0_mmc3_pu'] = df['vdiffd0_mmc3'].apply(lambda x: x/Vb)
-    df['vdiffq0_c_mmc3_pu'] = df['vdiffq0_c_mmc3'].apply(lambda x: x/Vb)
-    df['vdiffd0_c_mmc3_pu'] = df['vdiffd0_c_mmc3'].apply(lambda x: x/Vb)
-    df['vsum0_mmc3_pu'] = df['vsum0_mmc3'].apply(lambda x: x/Vb)
-    df['vDC0_mmc3_pu'] = df['vDC0_mmc3'].apply(lambda x: x/Vb)
-    df['vnq0_mmc4_pu'] = df['vnq0_mmc4'].apply(lambda x: x/Vb)
-    df['vnd0_mmc4_pu'] = df['vnd0_mmc4'].apply(lambda x: x/Vb)
-    df['vnq0_c_mmc4_pu'] = df['vnq0_c_mmc4'].apply(lambda x: x/Vb)
-    df['vnd0_c_mmc4_pu'] = df['vnd0_c_mmc4'].apply(lambda x: x/Vb)
-    df['vdiffq0_mmc4_pu'] = df['vdiffq0_mmc4'].apply(lambda x: x/Vb)
-    df['vdiffd0_mmc4_pu'] = df['vdiffd0_mmc4'].apply(lambda x: x/Vb)
-    df['vdiffq0_c_mmc4_pu'] = df['vdiffq0_c_mmc4'].apply(lambda x: x/Vb)
-    df['vdiffd0_c_mmc4_pu'] = df['vdiffd0_c_mmc4'].apply(lambda x: x/Vb)
-    df['vsum0_mmc4_pu'] = df['vsum0_mmc4'].apply(lambda x: x/Vb)
-    df['vDC0_mmc4_pu'] = df['vDC0_mmc4'].apply(lambda x: x/Vb)
-    df['vnq0_mmc5_pu'] = df['vnq0_mmc5'].apply(lambda x: x/Vb)
-    df['vnd0_mmc5_pu'] = df['vnd0_mmc5'].apply(lambda x: x/Vb)
-    df['vnq0_c_mmc5_pu'] = df['vnq0_c_mmc5'].apply(lambda x: x/Vb)
-    df['vnd0_c_mmc5_pu'] = df['vnd0_c_mmc5'].apply(lambda x: x/Vb)
-    df['vdiffq0_mmc5_pu'] = df['vdiffq0_mmc5'].apply(lambda x: x/Vb)
-    df['vdiffd0_mmc5_pu'] = df['vdiffd0_mmc5'].apply(lambda x: x/Vb)
-    df['vdiffq0_c_mmc5_pu'] = df['vdiffq0_c_mmc5'].apply(lambda x: x/Vb)
-    df['vdiffd0_c_mmc5_pu'] = df['vdiffd0_c_mmc5'].apply(lambda x: x/Vb)
-    df['vsum0_mmc5_pu'] = df['vsum0_mmc5'].apply(lambda x: x/Vb)
-    df['vDC0_mmc5_pu'] = df['vDC0_mmc5'].apply(lambda x: x/Vb)
-    df['vnq0_mmc6_pu'] = df['vnq0_mmc6'].apply(lambda x: x/Vb)
-    df['vnd0_mmc6_pu'] = df['vnd0_mmc6'].apply(lambda x: x/Vb)
-    df['vnq0_c_mmc6_pu'] = df['vnq0_c_mmc6'].apply(lambda x: x/Vb)
-    df['vnd0_c_mmc6_pu'] = df['vnd0_c_mmc6'].apply(lambda x: x/Vb)
-    df['vdiffq0_mmc6_pu'] = df['vdiffq0_mmc6'].apply(lambda x: x/Vb)
-    df['vdiffd0_mmc6_pu'] = df['vdiffd0_mmc6'].apply(lambda x: x/Vb)
-    df['vdiffq0_c_mmc6_pu'] = df['vdiffq0_c_mmc6'].apply(lambda x: x/Vb)
-    df['vdiffd0_c_mmc6_pu'] = df['vdiffd0_c_mmc6'].apply(lambda x: x/Vb)
-    df['vsum0_mmc6_pu'] = df['vsum0_mmc6'].apply(lambda x: x/Vb)
-    df['vDC0_mmc6_pu'] = df['vDC0_mmc6'].apply(lambda x: x/Vb)
-    df['vq0_th1_pu'] = df['vq0_th1'].apply(lambda x: x/Vb)
-    df['vd0_th1_pu'] = df['vd0_th1'].apply(lambda x: x/Vb)
-    df['vq0_th2_pu'] = df['vq0_th2'].apply(lambda x: x/Vb)
-    df['vd0_th2_pu'] = df['vd0_th2'].apply(lambda x: x/Vb)
-    df['Pth1_pu'] = df['Pth1'].apply(lambda x: x/Sb)
-    df['Pmmc1_pu'] = df['Pmmc1'].apply(lambda x: x/Sb)
-    df['Pg1_pu'] = df['Pg1'].apply(lambda x: x/Sb)
-    df['Pmmc2_pu'] = df['Pmmc2'].apply(lambda x: x/Sb)
-    df['Pmmc4_pu'] = df['Pmmc4'].apply(lambda x: x/Sb)
-    df['Pmmc3_pu'] = df['Pmmc3'].apply(lambda x: x/Sb)
-    df['Pl7_pu'] = df['Pl7'].apply(lambda x: x/Sb)
-    df['Pth2_pu'] = df['Pth2'].apply(lambda x: x/Sb)
-    df['Pmmc6_pu'] = df['Pmmc6'].apply(lambda x: x/Sb)
-    df['Pmmc5_pu'] = df['Pmmc5'].apply(lambda x: x/Sb)
-    df['Pg3_pu'] = df['Pg3'].apply(lambda x: x/Sb)
-    df['Pg2_pu'] = df['Pg2'].apply(lambda x: x/Sb)
-    df['Pl2_pu'] = df['Pl2'].apply(lambda x: x/Sb)
-    df['Pl5_pu'] = df['Pl5'].apply(lambda x: x/Sb)
-    df['Pl9_pu'] = df['Pl9'].apply(lambda x: x/Sb)
-    df['Qth1_pu'] = df['Qth1'].apply(lambda x: x/Sb)
-    df['Qmmc1_pu'] = df['Qmmc1'].apply(lambda x: x/Sb)
-    df['Qg1_pu'] = df['Qg1'].apply(lambda x: x/Sb)
-    df['Qmmc2_pu'] = df['Qmmc2'].apply(lambda x: x/Sb)
-    df['Qmmc4_pu'] = df['Qmmc4'].apply(lambda x: x/Sb)
-    df['Qmmc3_pu'] = df['Qmmc3'].apply(lambda x: x/Sb)
-    df['Ql7_pu'] = df['Ql7'].apply(lambda x: x/Sb)
-    df['Qth2_pu'] = df['Qth2'].apply(lambda x: x/Sb)
-    df['Qmmc6_pu'] = df['Qmmc6'].apply(lambda x: x/Sb)
-    df['Qmmc5_pu'] = df['Qmmc5'].apply(lambda x: x/Sb)
-    df['Qg3_pu'] = df['Qg3'].apply(lambda x: x/Sb)
-    df['Qg2_pu'] = df['Qg2'].apply(lambda x: x/Sb)
-    df['Ql2_pu'] = df['Ql2'].apply(lambda x: x/Sb)
-    df['Ql5_pu'] = df['Ql5'].apply(lambda x: x/Sb)
-    df['Ql9_pu'] = df['Ql9'].apply(lambda x: x/Sb)
-    df['P1dc_pu'] = df['P1dc'].apply(lambda x: x/Sb)
-    df['P2dc_pu'] = df['P2dc'].apply(lambda x: x/Sb)
-    df['P3dc_pu'] = df['P3dc'].apply(lambda x: x/Sb)
-    df['P4dc_pu'] = df['P4dc'].apply(lambda x: x/Sb)
-    df['P5dc_pu'] = df['P5dc'].apply(lambda x: x/Sb)
-    df['P6dc_pu'] = df['P6dc'].apply(lambda x: x/Sb)
-    df['P_1_pu'] = df['P_1'].apply(lambda x: x/Sb)
-    df['Q_1_pu'] = df['Q_1'].apply(lambda x: x/Sb)
-    df['P_2_pu'] = df['P_2'].apply(lambda x: x/Sb)
-    df['Q_2_pu'] = df['Q_2'].apply(lambda x: x/Sb)
-    df['P_3_pu'] = df['P_3'].apply(lambda x: x/Sb)
-    df['Q_3_pu'] = df['Q_3'].apply(lambda x: x/Sb)
-    df['P_4_pu'] = df['P_4'].apply(lambda x: x/Sb)
-    df['Q_4_pu'] = df['Q_4'].apply(lambda x: x/Sb)
-    df['P_5_pu'] = df['P_5'].apply(lambda x: x/Sb)
-    df['Q_5_pu'] = df['Q_5'].apply(lambda x: x/Sb)
-    df['P_6_pu'] = df['P_6'].apply(lambda x: x/Sb)
-    df['Q_6_pu'] = df['Q_6'].apply(lambda x: x/Sb)
-    df['P_7_pu'] = df['P_7'].apply(lambda x: x/Sb)
-    df['Q_7_pu'] = df['Q_7'].apply(lambda x: x/Sb)
-    df['iq0_1_pu'] = df['iq0_1'].apply(lambda x: x/Ib)
-    df['id0_1_pu'] = df['id0_1'].apply(lambda x: x/Ib)
-    df['iq0c_1_pu'] = df['iq0c_1'].apply(lambda x: x/Ib)
-    df['id0c_1_pu'] = df['id0c_1'].apply(lambda x: x/Ib)
-    df['iq0_2_pu'] = df['iq0_2'].apply(lambda x: x/Ib)
-    df['id0_2_pu'] = df['id0_2'].apply(lambda x: x/Ib)
-    df['iq0c_2_pu'] = df['iq0c_2'].apply(lambda x: x/Ib)
-    df['id0c_2_pu'] = df['id0c_2'].apply(lambda x: x/Ib)
-    df['iq0_3_pu'] = df['iq0_3'].apply(lambda x: x/Ib)
-    df['id0_3_pu'] = df['id0_3'].apply(lambda x: x/Ib)
-    df['iq0c_3_pu'] = df['iq0c_3'].apply(lambda x: x/Ib)
-    df['id0c_3_pu'] = df['id0c_3'].apply(lambda x: x/Ib)
-    df['iq0_4_pu'] = df['iq0_4'].apply(lambda x: x/Ib)
-    df['id0_4_pu'] = df['id0_4'].apply(lambda x: x/Ib)
-    df['iq0c_4_pu'] = df['iq0c_4'].apply(lambda x: x/Ib)
-    df['id0c_4_pu'] = df['id0c_4'].apply(lambda x: x/Ib)
-    df['iq0_5_pu'] = df['iq0_5'].apply(lambda x: x/Ib)
-    df['id0_5_pu'] = df['id0_5'].apply(lambda x: x/Ib)
-    df['iq0c_5_pu'] = df['iq0c_5'].apply(lambda x: x/Ib)
-    df['id0c_5_pu'] = df['id0c_5'].apply(lambda x: x/Ib)
-    df['iq0_6_pu'] = df['iq0_6'].apply(lambda x: x/Ib)
-    df['id0_6_pu'] = df['id0_6'].apply(lambda x: x/Ib)
-    df['iq0c_6_pu'] = df['iq0c_6'].apply(lambda x: x/Ib)
-    df['id0c_6_pu'] = df['id0c_6'].apply(lambda x: x/Ib)
-    df['iq0_7_pu'] = df['iq0_7'].apply(lambda x: x/Ib)
-    df['id0_7_pu'] = df['id0_7'].apply(lambda x: x/Ib)
-    df['iq0c_7_pu'] = df['iq0c_7'].apply(lambda x: x/Ib)
-    df['id0c_7_pu'] = df['id0c_7'].apply(lambda x: x/Ib)
-    df['idiffq0_mmc1_pu'] = df['idiffq0_mmc1'].apply(lambda x: x/Ib)
-    df['idiffd0_mmc1_pu'] = df['idiffd0_mmc1'].apply(lambda x: x/Ib)
-    df['idiffq0_c_mmc1_pu'] = df['idiffq0_c_mmc1'].apply(lambda x: x/Ib)
-    df['idiffd0_c_mmc1_pu'] = df['idiffd0_c_mmc1'].apply(lambda x: x/Ib)
-    df['isum0_mmc1_pu'] = df['isum0_mmc1'].apply(lambda x: x/Ib)
-    df['idiffq0_mmc2_pu'] = df['idiffq0_mmc2'].apply(lambda x: x/Ib)
-    df['idiffd0_mmc2_pu'] = df['idiffd0_mmc2'].apply(lambda x: x/Ib)
-    df['idiffq0_c_mmc2_pu'] = df['idiffq0_c_mmc2'].apply(lambda x: x/Ib)
-    df['idiffd0_c_mmc2_pu'] = df['idiffd0_c_mmc2'].apply(lambda x: x/Ib)
-    df['isum0_mmc2_pu'] = df['isum0_mmc2'].apply(lambda x: x/Ib)
-    df['idiffq0_mmc3_pu'] = df['idiffq0_mmc3'].apply(lambda x: x/Ib)
-    df['idiffd0_mmc3_pu'] = df['idiffd0_mmc3'].apply(lambda x: x/Ib)
-    df['idiffq0_c_mmc3_pu'] = df['idiffq0_c_mmc3'].apply(lambda x: x/Ib)
-    df['idiffd0_c_mmc3_pu'] = df['idiffd0_c_mmc3'].apply(lambda x: x/Ib)
-    df['isum0_mmc3_pu'] = df['isum0_mmc3'].apply(lambda x: x/Ib)
-    df['idiffq0_mmc4_pu'] = df['idiffq0_mmc4'].apply(lambda x: x/Ib)
-    df['idiffd0_mmc4_pu'] = df['idiffd0_mmc4'].apply(lambda x: x/Ib)
-    df['idiffq0_c_mmc4_pu'] = df['idiffq0_c_mmc4'].apply(lambda x: x/Ib)
-    df['idiffd0_c_mmc4_pu'] = df['idiffd0_c_mmc4'].apply(lambda x: x/Ib)
-    df['isum0_mmc4_pu'] = df['isum0_mmc4'].apply(lambda x: x/Ib)
-    df['idiffq0_mmc5_pu'] = df['idiffq0_mmc5'].apply(lambda x: x/Ib)
-    df['idiffd0_mmc5_pu'] = df['idiffd0_mmc5'].apply(lambda x: x/Ib)
-    df['idiffq0_c_mmc5_pu'] = df['idiffq0_c_mmc5'].apply(lambda x: x/Ib)
-    df['idiffd0_c_mmc5_pu'] = df['idiffd0_c_mmc5'].apply(lambda x: x/Ib)
-    df['isum0_mmc5_pu'] = df['isum0_mmc5'].apply(lambda x: x/Ib)
-    df['idiffq0_mmc6_pu'] = df['idiffq0_mmc6'].apply(lambda x: x/Ib)
-    df['idiffd0_mmc6_pu'] = df['idiffd0_mmc6'].apply(lambda x: x/Ib)
-    df['idiffq0_c_mmc6_pu'] = df['idiffq0_c_mmc6'].apply(lambda x: x/Ib)
-    df['idiffd0_c_mmc6_pu'] = df['idiffd0_c_mmc6'].apply(lambda x: x/Ib)
-    df['isum0_mmc6_pu'] = df['isum0_mmc6'].apply(lambda x: x/Ib)
-    df['iq0_th1_pu'] = df['iq0_th1'].apply(lambda x: x/Ib)
-    df['id0_th1_pu'] = df['id0_th1'].apply(lambda x: x/Ib)
-    df['iq0_th2_pu'] = df['iq0_th2'].apply(lambda x: x/Ib)
-    df['id0_th2_pu'] = df['id0_th2'].apply(lambda x: x/Ib)
-    
-    return df
-    
-def final_df(df,columns_remove,rows_remove): # Return final df (w/o removed columns and rows)
-    return df.drop(columns_remove, axis=1, errors='ignore').drop(rows_remove, axis=0, errors='ignore')
-    
-def features_creation(df):
-    df['mod_v_1_pu'] =  np.sqrt(np.power(df['vq0_1_pu'],2) + np.power(df['vd0_1_pu'],2))
-    df['ang_v_1_pu'] =  np.arctan(df['vd0_1_pu']/df['vq0_1_pu'])
-    df['mod_v_2_pu'] =  np.sqrt(np.power(df['vq0_2_pu'],2) + np.power(df['vd0_2_pu'],2))
-    df['ang_v_2_pu'] =  np.arctan(df['vd0_2_pu']/df['vq0_2_pu'])
-    df['mod_v_3_pu'] =  np.sqrt(np.power(df['vq0_3_pu'],2) + np.power(df['vd0_3_pu'],2))
-    df['ang_v_3_pu'] =  np.arctan(df['vd0_3_pu']/df['vq0_3_pu'])
-    df['mod_v_4_pu'] =  np.sqrt(np.power(df['vq0_4_pu'],2) + np.power(df['vd0_4_pu'],2))
-    df['ang_v_4_pu'] =  np.arctan(df['vd0_4_pu']/df['vq0_4_pu'])
-    df['mod_v_5_pu'] =  np.sqrt(np.power(df['vq0_5_pu'],2) + np.power(df['vd0_5_pu'],2))
-    df['ang_v_5_pu'] =  np.arctan(df['vd0_5_pu']/df['vq0_5_pu'])
-    df['mod_v_6_pu'] =  np.sqrt(np.power(df['vq0_6_pu'],2) + np.power(df['vd0_6_pu'],2))
-    df['ang_v_6_pu'] =  np.arctan(df['vd0_6_pu']/df['vq0_6_pu'])
-    df['mod_v_mmc1_pu'] =  np.sqrt(np.power(df['vnq0_mmc1_pu'],2) + np.power(df['vnd0_mmc1_pu'],2))
-    df['ang_v_mmc1_pu'] =  np.arctan(df['vnd0_mmc1_pu']/df['vnq0_mmc1_pu'])
-    df['mod_v_mmc1_pu'] =  np.sqrt(np.power(df['vdiffq0_mmc1_pu'],2) + np.power(df['vdiffd0_mmc1_pu'],2))
-    df['ang_v_mmc1_pu'] =  np.arctan(df['vdiffd0_mmc1_pu']/df['vdiffq0_mmc1_pu'])
-    df['mod_v_mmc2_pu'] =  np.sqrt(np.power(df['vnq0_mmc2_pu'],2) + np.power(df['vnd0_mmc2_pu'],2))
-    df['ang_v_mmc2_pu'] =  np.arctan(df['vnd0_mmc2_pu']/df['vnq0_mmc2_pu'])
-    df['mod_v_mmc2_pu'] =  np.sqrt(np.power(df['vdiffq0_mmc2_pu'],2) + np.power(df['vdiffd0_mmc2_pu'],2))
-    df['ang_v_mmc2_pu'] =  np.arctan(df['vdiffd0_mmc2_pu']/df['vdiffq0_mmc2_pu'])
-    df['mod_v_mmc3_pu'] =  np.sqrt(np.power(df['vnq0_mmc3_pu'],2) + np.power(df['vnd0_mmc3_pu'],2))
-    df['ang_v_mmc3_pu'] =  np.arctan(df['vnd0_mmc3_pu']/df['vnq0_mmc3_pu'])
-    df['mod_v_mmc3_pu'] =  np.sqrt(np.power(df['vdiffq0_mmc3_pu'],2) + np.power(df['vdiffd0_mmc3_pu'],2))
-    df['ang_v_mmc3_pu'] =  np.arctan(df['vdiffd0_mmc3_pu']/df['vdiffq0_mmc3_pu'])
-    df['mod_v_mmc4_pu'] =  np.sqrt(np.power(df['vnq0_mmc4_pu'],2) + np.power(df['vnd0_mmc4_pu'],2))
-    df['ang_v_mmc4_pu'] =  np.arctan(df['vnd0_mmc4_pu']/df['vnq0_mmc4_pu'])
-    df['mod_v_mmc4_pu'] =  np.sqrt(np.power(df['vdiffq0_mmc4_pu'],2) + np.power(df['vdiffd0_mmc4_pu'],2))
-    df['ang_v_mmc4_pu'] =  np.arctan(df['vdiffd0_mmc4_pu']/df['vdiffq0_mmc4_pu'])
-    df['mod_v_mmc6_pu'] =  np.sqrt(np.power(df['vnq0_mmc6_pu'],2) + np.power(df['vnd0_mmc6_pu'],2))
-    df['ang_v_mmc6_pu'] =  np.arctan(df['vnd0_mmc6_pu']/df['vnq0_mmc6_pu'])
-    df['mod_v_mmc6_pu'] =  np.sqrt(np.power(df['vdiffq0_mmc6_pu'],2) + np.power(df['vdiffd0_mmc6_pu'],2))
-    df['ang_v_mmc6_pu'] =  np.arctan(df['vdiffd0_mmc6_pu']/df['vdiffq0_mmc6_pu'])
-    df['mod_i_1_pu'] =  np.sqrt(np.power(df['iq0_1_pu'],2) + np.power(df['id0_1_pu'],2))
-    df['ang_i_1_pu'] =  np.arctan(df['id0_1_pu']/df['iq0_1_pu'])
-    df['mod_i_2_pu'] =  np.sqrt(np.power(df['iq0_2_pu'],2) + np.power(df['id0_2_pu'],2))
-    df['ang_i_2_pu'] =  np.arctan(df['id0_2_pu']/df['iq0_2_pu'])
-    df['mod_i_3_pu'] =  np.sqrt(np.power(df['iq0_3_pu'],2) + np.power(df['id0_3_pu'],2))
-    df['ang_i_3_pu'] =  np.arctan(df['id0_3_pu']/df['iq0_3_pu'])
-    df['mod_i_4_pu'] =  np.sqrt(np.power(df['iq0_4_pu'],2) + np.power(df['id0_4_pu'],2))
-    df['ang_i_4_pu'] =  np.arctan(df['id0_4_pu']/df['iq0_4_pu'])
-    df['mod_i_5_pu'] =  np.sqrt(np.power(df['iq0_5_pu'],2) + np.power(df['id0_5_pu'],2))
-    df['ang_i_5_pu'] =  np.arctan(df['id0_5_pu']/df['iq0_5_pu'])
-    df['mod_i_6_pu'] =  np.sqrt(np.power(df['iq0_6_pu'],2) + np.power(df['id0_6_pu'],2))
-    df['ang_i_6_pu'] =  np.arctan(df['id0_6_pu']/df['iq0_6_pu'])
-    df['mod_i_mmc1_pu'] =  np.sqrt(np.power(df['idiffq0_mmc1_pu'],2) + np.power(df['idiffd0_mmc1_pu'],2))
-    df['ang_i_mmc1_pu'] =  np.arctan(df['idiffd0_mmc1_pu']/df['idiffq0_mmc1_pu'])
-    df['mod_i_mmc2_pu'] =  np.sqrt(np.power(df['idiffq0_mmc2_pu'],2) + np.power(df['idiffd0_mmc2_pu'],2))
-    df['ang_i_mmc2_pu'] =  np.arctan(df['idiffd0_mmc2_pu']/df['idiffq0_mmc2_pu'])
-    df['mod_i_mmc3_pu'] =  np.sqrt(np.power(df['idiffq0_mmc3_pu'],2) + np.power(df['idiffd0_mmc3_pu'],2))
-    df['ang_i_mmc3_pu'] =  np.arctan(df['idiffd0_mmc3_pu']/df['idiffq0_mmc3_pu'])
-    df['mod_i_mmc4_pu'] =  np.sqrt(np.power(df['idiffq0_mmc4_pu'],2) + np.power(df['idiffd0_mmc4_pu'],2))
-    df['ang_i_mmc4_pu'] =  np.arctan(df['idiffd0_mmc4_pu']/df['idiffq0_mmc4_pu'])
-    df['mod_i_mmc6_pu'] =  np.sqrt(np.power(df['idiffq0_mmc6_pu'],2) + np.power(df['idiffd0_mmc6_pu'],2))
-    df['ang_i_mmc6_pu'] =  np.arctan(df['idiffd0_mmc6_pu']/df['idiffq0_mmc6_pu'])
-    df['mod_i_th1_pu'] =  np.sqrt(np.power(df['iq0_th1_pu'],2) + np.power(df['id0_th1_pu'],2))
-    df['ang_i_th1_pu'] =  np.arctan(df['id0_th1_pu']/df['iq0_th1_pu'])
-    df['mod_i_th2_pu'] =  np.sqrt(np.power(df['iq0_th2_pu'],2) + np.power(df['id0_th2_pu'],2))
-    df['ang_i_th2_pu'] =  np.arctan(df['id0_th2_pu']/df['iq0_th2_pu'])
-    df['mod_Sth1_pu'] =  np.sqrt(np.power(df['Pth1_pu'],2) + np.power(df['Qth1_pu'],2))
-    df['mod_Smmc1_pu'] =  np.sqrt(np.power(df['Pmmc1_pu'],2) + np.power(df['Qmmc1_pu'],2))
-    df['mod_Sg1_pu'] =  np.sqrt(np.power(df['Pg1_pu'],2) + np.power(df['Qg1_pu'],2))
-    df['mod_Smmc2_pu'] =  np.sqrt(np.power(df['Pmmc2_pu'],2) + np.power(df['Qmmc2_pu'],2))
-    df['mod_Smmc4_pu'] =  np.sqrt(np.power(df['Pmmc4_pu'],2) + np.power(df['Qmmc4_pu'],2))
-    df['mod_Smmc3_pu'] =  np.sqrt(np.power(df['Pmmc3_pu'],2) + np.power(df['Qmmc3_pu'],2))
-    df['mod_Sl7_pu'] =  np.sqrt(np.power(df['Pl7_pu'],2) + np.power(df['Ql7_pu'],2))
-    df['mod_Sth2_pu'] =  np.sqrt(np.power(df['Pth2_pu'],2) + np.power(df['Qth2_pu'],2))
-    df['mod_Smmc6_pu'] =  np.sqrt(np.power(df['Pmmc6_pu'],2) + np.power(df['Qmmc6_pu'],2))
-    df['mod_Smmc5_pu'] =  np.sqrt(np.power(df['Pmmc5_pu'],2) + np.power(df['Qmmc5_pu'],2))
-    df['mod_Sg3_pu'] =  np.sqrt(np.power(df['Pg3_pu'],2) + np.power(df['Qg3_pu'],2))
-    df['mod_Sg2_pu'] =  np.sqrt(np.power(df['Pg2_pu'],2) + np.power(df['Qg2_pu'],2))
-    df['mod_Sl2_pu'] =  np.sqrt(np.power(df['Pl2_pu'],2) + np.power(df['Ql2_pu'],2))
-    df['mod_Sl5_pu'] =  np.sqrt(np.power(df['Pl5_pu'],2) + np.power(df['Ql5_pu'],2))
-    df['mod_Sl9_pu'] =  np.sqrt(np.power(df['Pl9_pu'],2) + np.power(df['Ql9_pu'],2))
-    df['mod_S_1_pu'] =  np.sqrt(np.power(df['P_1_pu'],2) + np.power(df['Q_1_pu'],2))
-    df['mod_S_2_pu'] =  np.sqrt(np.power(df['P_2_pu'],2) + np.power(df['Q_2_pu'],2))
-    df['mod_S_3_pu'] =  np.sqrt(np.power(df['P_3_pu'],2) + np.power(df['Q_3_pu'],2))
-    df['mod_S_4_pu'] =  np.sqrt(np.power(df['P_4_pu'],2) + np.power(df['Q_4_pu'],2))
-    df['mod_S_5_pu'] =  np.sqrt(np.power(df['P_5_pu'],2) + np.power(df['Q_5_pu'],2))
-    df['mod_S_6_pu'] =  np.sqrt(np.power(df['P_6_pu'],2) + np.power(df['Q_6_pu'],2))
-    df['mod_S_7_pu'] =  np.sqrt(np.power(df['P_7_pu'],2) + np.power(df['Q_7_pu'],2))
-    df['Pth1_pu lt 0'] = df['Pth1_pu'].apply(lambda x: x<0)
-    df['abs_Pth1_pu'] = abs(df['Pth1_pu'])
-    df['Pmmc1_pu lt 0'] = df['Pmmc1_pu'].apply(lambda x: x<0)
-    df['abs_Pmmc1_pu'] = abs(df['Pmmc1_pu'])
-    df['Pg1_pu lt 0'] = df['Pg1_pu'].apply(lambda x: x<0)
-    df['abs_Pg1_pu'] = abs(df['Pg1_pu'])
-    df['Pmmc2_pu lt 0'] = df['Pmmc2_pu'].apply(lambda x: x<0)
-    df['abs_Pmmc2_pu'] = abs(df['Pmmc2_pu'])
-    df['Pmmc4_pu lt 0'] = df['Pmmc4_pu'].apply(lambda x: x<0)
-    df['abs_Pmmc4_pu'] = abs(df['Pmmc4_pu'])
-    df['Pmmc3_pu lt 0'] = df['Pmmc3_pu'].apply(lambda x: x<0)
-    df['abs_Pmmc3_pu'] = abs(df['Pmmc3_pu'])
-    df['Pl7_pu lt 0'] = df['Pl7_pu'].apply(lambda x: x<0)
-    df['abs_Pl7_pu'] = abs(df['Pl7_pu'])
-    df['Pth2_pu lt 0'] = df['Pth2_pu'].apply(lambda x: x<0)
-    df['abs_Pth2_pu'] = abs(df['Pth2_pu'])
-    df['Pmmc6_pu lt 0'] = df['Pmmc6_pu'].apply(lambda x: x<0)
-    df['abs_Pmmc6_pu'] = abs(df['Pmmc6_pu'])
-    df['Pmmc5_pu lt 0'] = df['Pmmc5_pu'].apply(lambda x: x<0)
-    df['abs_Pmmc5_pu'] = abs(df['Pmmc5_pu'])
-    df['Pg3_pu lt 0'] = df['Pg3_pu'].apply(lambda x: x<0)
-    df['abs_Pg3_pu'] = abs(df['Pg3_pu'])
-    df['Pg2_pu lt 0'] = df['Pg2_pu'].apply(lambda x: x<0)
-    df['abs_Pg2_pu'] = abs(df['Pg2_pu'])
-    df['Pl2_pu lt 0'] = df['Pl2_pu'].apply(lambda x: x<0)
-    df['abs_Pl2_pu'] = abs(df['Pl2_pu'])
-    df['Pl5_pu lt 0'] = df['Pl5_pu'].apply(lambda x: x<0)
-    df['abs_Pl5_pu'] = abs(df['Pl5_pu'])
-    df['Pl9_pu lt 0'] = df['Pl9_pu'].apply(lambda x: x<0)
-    df['abs_Pl9_pu'] = abs(df['Pl9_pu'])
-    df['P1dc_pu lt 0'] = df['P1dc_pu'].apply(lambda x: x<0)
-    df['abs_P1dc_pu'] = abs(df['P1dc_pu'])
-    df['P2dc_pu lt 0'] = df['P2dc_pu'].apply(lambda x: x<0)
-    df['abs_P2dc_pu'] = abs(df['P2dc_pu'])
-    df['P3dc_pu lt 0'] = df['P3dc_pu'].apply(lambda x: x<0)
-    df['abs_P3dc_pu'] = abs(df['P3dc_pu'])
-    df['P4dc_pu lt 0'] = df['P4dc_pu'].apply(lambda x: x<0)
-    df['abs_P4dc_pu'] = abs(df['P4dc_pu'])
-    df['P5dc_pu lt 0'] = df['P5dc_pu'].apply(lambda x: x<0)
-    df['abs_P5dc_pu'] = abs(df['P5dc_pu'])
-    df['P6dc_pu lt 0'] = df['P6dc_pu'].apply(lambda x: x<0)
-    df['abs_P6dc_pu'] = abs(df['P6dc_pu'])
-    df['P_1_pu lt 0'] = df['P_1_pu'].apply(lambda x: x<0)
-    df['abs_P_1_pu'] = abs(df['P_1_pu'])
-    df['P_2_pu lt 0'] = df['P_2_pu'].apply(lambda x: x<0)
-    df['abs_P_2_pu'] = abs(df['P_2_pu'])
-    df['P_3_pu lt 0'] = df['P_3_pu'].apply(lambda x: x<0)
-    df['abs_P_3_pu'] = abs(df['P_3_pu'])
-    df['P_4_pu lt 0'] = df['P_4_pu'].apply(lambda x: x<0)
-    df['abs_P_4_pu'] = abs(df['P_4_pu'])
-    df['P_5_pu lt 0'] = df['P_5_pu'].apply(lambda x: x<0)
-    df['abs_P_5_pu'] = abs(df['P_5_pu'])
-    df['P_6_pu lt 0'] = df['P_6_pu'].apply(lambda x: x<0)
-    df['abs_P_6_pu'] = abs(df['P_6_pu'])
-    df['P_7_pu lt 0'] = df['P_7_pu'].apply(lambda x: x<0)
-    df['abs_P_7_pu'] = abs(df['P_7_pu'])
-    df['Qth1_pu lt 0'] = df['Qth1_pu'].apply(lambda x: x<0)
-    df['abs_Qth1_pu'] = abs(df['Qth1_pu'])
-    df['Qmmc1_pu lt 0'] = df['Qmmc1_pu'].apply(lambda x: x<0)
-    df['abs_Qmmc1_pu'] = abs(df['Qmmc1_pu'])
-    df['Qg1_pu lt 0'] = df['Qg1_pu'].apply(lambda x: x<0)
-    df['abs_Qg1_pu'] = abs(df['Qg1_pu'])
-    df['Qmmc2_pu lt 0'] = df['Qmmc2_pu'].apply(lambda x: x<0)
-    df['abs_Qmmc2_pu'] = abs(df['Qmmc2_pu'])
-    df['Qmmc4_pu lt 0'] = df['Qmmc4_pu'].apply(lambda x: x<0)
-    df['abs_Qmmc4_pu'] = abs(df['Qmmc4_pu'])
-    df['Qmmc3_pu lt 0'] = df['Qmmc3_pu'].apply(lambda x: x<0)
-    df['abs_Qmmc3_pu'] = abs(df['Qmmc3_pu'])
-    df['Ql7_pu lt 0'] = df['Ql7_pu'].apply(lambda x: x<0)
-    df['abs_Ql7_pu'] = abs(df['Ql7_pu'])
-    df['Qth2_pu lt 0'] = df['Qth2_pu'].apply(lambda x: x<0)
-    df['abs_Qth2_pu'] = abs(df['Qth2_pu'])
-    df['Qmmc6_pu lt 0'] = df['Qmmc6_pu'].apply(lambda x: x<0)
-    df['abs_Qmmc6_pu'] = abs(df['Qmmc6_pu'])
-    df['Qmmc5_pu lt 0'] = df['Qmmc5_pu'].apply(lambda x: x<0)
-    df['abs_Qmmc5_pu'] = abs(df['Qmmc5_pu'])
-    df['Qg3_pu lt 0'] = df['Qg3_pu'].apply(lambda x: x<0)
-    df['abs_Qg3_pu'] = abs(df['Qg3_pu'])
-    df['Qg2_pu lt 0'] = df['Qg2_pu'].apply(lambda x: x<0)
-    df['abs_Qg2_pu'] = abs(df['Qg2_pu'])
-    df['Ql2_pu lt 0'] = df['Ql2_pu'].apply(lambda x: x<0)
-    df['abs_Ql2_pu'] = abs(df['Ql2_pu'])
-    df['Ql5_pu lt 0'] = df['Ql5_pu'].apply(lambda x: x<0)
-    df['abs_Ql5_pu'] = abs(df['Ql5_pu'])
-    df['Ql9_pu lt 0'] = df['Ql9_pu'].apply(lambda x: x<0)
-    df['abs_Ql9_pu'] = abs(df['Ql9_pu'])
-    df['Q_1_pu lt 0'] = df['Q_1_pu'].apply(lambda x: x<0)
-    df['abs_Q_1_pu'] = abs(df['Q_1_pu'])
-    df['Q_2_pu lt 0'] = df['Q_2_pu'].apply(lambda x: x<0)
-    df['abs_Q_2_pu'] = abs(df['Q_2_pu'])
-    df['Q_3_pu lt 0'] = df['Q_3_pu'].apply(lambda x: x<0)
-    df['abs_Q_3_pu'] = abs(df['Q_3_pu'])
-    df['Q_4_pu lt 0'] = df['Q_4_pu'].apply(lambda x: x<0)
-    df['abs_Q_4_pu'] = abs(df['Q_4_pu'])
-    df['Q_5_pu lt 0'] = df['Q_5_pu'].apply(lambda x: x<0)
-    df['abs_Q_5_pu'] = abs(df['Q_5_pu'])
-    df['Q_6_pu lt 0'] = df['Q_6_pu'].apply(lambda x: x<0)
-    df['abs_Q_6_pu'] = abs(df['Q_6_pu'])
-    df['Q_7_pu lt 0'] = df['Q_7_pu'].apply(lambda x: x<0)
-    df['abs_Q_7_pu'] = abs(df['Q_7_pu'])
-
-    return df

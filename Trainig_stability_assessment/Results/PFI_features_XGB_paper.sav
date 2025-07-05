@@ -1,0 +1,1 @@
+PFI_dict={'XGB': ['IPCC', 'IPCE', 'IPCA', 'IPCB', 'isum0_mmc1_pu', 'IPCD', 'mod_v_mmc6_pu', 'mod_v_mmc3_pu', 'ang_v_6_pu', 'ang_v_mmc3_pu', 'theta2', 'P1dc_pu', 'Pg2_pu', 'V8_pu', 'Qmmc4_pu', 'theta3', 'Pg1_pu', 'mod_Smmc2_pu', 'mod_i_mmc2_pu', 'Qth2_pu', 'P3dc_pu', 'V1_pu', 'Pmmc4_pu', 'Pmmc6_pu']}
