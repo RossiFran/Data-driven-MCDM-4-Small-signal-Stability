@@ -1,0 +1,6 @@
+Sb=500e6
+Vb=280e3
+Fb=50
+Ib=Sb/(np.sqrt(3)*Vb)
+Zb=Vb**2/Sb
+Wb=2*np.pi*Fb
