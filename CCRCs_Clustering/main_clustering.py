@@ -87,19 +87,20 @@ X = preprocess_data(df_X_PF_IPC)
 n_intervals=5
 df_X_PCA, x_list, y_list, z_list = PCA_cluster(X, n_intervals, plot=True)
 
+#%% ---- CREATE dataset with  ROWS = N_PFs x Combinations; COLUMNS = X_PF_IPC_INDICATORS  ----
+df_CCRs_PF_ind = df_1st_exploration(df_X_PF_IPC, np.arange(1,len(combinations)+1), combinations, n_powerflows, path_data, True)
+
 #%%
-for indicator in indicators_list:
+for indicator in ['DCgain_vdc']:#indicators_list:
     
     df_pf_ind = PFs_x_CCRCs(n_powerflows, indicator, combinations, path_data)
             
     #%%
-    df_CCRs_PF_ind = df_1st_exploration(df_X_PF_IPC, np.arange(1,len(combinations)+1), combinations, n_powerflows, path_data, True)
     
     heatmap, CCRCs2clustering, df_pf_ind_levels = heatmap_function(n_intervals, x_list, y_list, z_list, indicator, 
                                                 df_X_PCA, df_CCRs_PF_ind, df_pf_ind, 
                                                 combinations, indicators_plot_labels)#, plot=True)
-                        
-    
+                            
     #%% ---- CCRCs CLUSTERING ACCORDING TO SINGLE INDICATOR ----
     if indicator == 'DCgain_vdc':
         seed=2

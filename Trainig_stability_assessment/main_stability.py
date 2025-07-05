@@ -37,6 +37,7 @@ from utils import *
 from data_preprocessing import *
 from models_comparison import *
 from training_functions import *
+from create_dataset import *
 
 #SAVE THE MODEL
 import joblib
@@ -63,36 +64,51 @@ pd.options.display.float_format = '{:,.2f}'.format
 pd.set_option('display.width', 84)
 pd.set_option('display.max_columns', None)
 
+#%%
+''' to use the same list of CCRCs selected in the paper set reproduce_paper='_paper', else reproduce_paper=str()'''
+
+reproduce_paper=str()#'_paper'
 
 #%%
 indicators_list=['H2_freq', 'H2_vdc','DCgain_vdc','DCgain_freq']
 
 #%%
 exec(open('../Settings/combinations.sav').read())
-exec(open('../CCRCs_clustering/Results/CCRC_dict_paper.sav').read())
+exec(open('../CCRCs_clustering/Results/CCRC_dict'+reproduce_paper+'.sav').read())
 
-combinations_selected=CCRCs_dict['selected_CCRC']
+combinations_selected=CCRC_dict['selected_CCRC']
 
-#%% ---- CREATE COMPLETE DB ----
+#%% ----  LOAD CREATED DB ----
 path='./Results/'
-path_data='./Data/'
 
-filename='df_selected_combinations.csv'
+path_data='../Datasets/'
 
+#Load DB
+filename='df_selected_combinations'+reproduce_paper+'.csv'
 df=pd.read_csv(path_data+filename).drop('Unnamed: 0',axis=1)
+
+
+#%% APPLY DATA PREPROCESSING
+
+Sb, Vb, Fb, Ib, Zb, Wb = system_bases()
+
+
+exec(open('../Datasets/columns_groups'+reproduce_paper+'.sav').read())
+
+
+exec(open('../Datasets/feature_creation'+reproduce_paper+'.sav').read())
+
+
+exec(open('../Datasets/dataclean'+reproduce_paper+'.sav').read())
+
+columns_remove.update(['Combination'])
+
+df = final_df(df, columns_remove, rows_remove)
 
 #%% SET SCORER METRICS
 
 print('Stable cases = ', df[['Stable']].mean()[0]*100)
 scorer = set_scorer(df)
-
-#%% DATA PREPROCESSING
-
-#TODO: fix this in the files
-# df.rename(columns = {'P2l':'Pl2', 'P5l':'Pl5', 'P9l':'Pl9','Q2l':'Ql2', 'Q5l':'Ql5', 'Q9l':'Ql9'}, inplace = True)
-df = df.drop(indicators_list, axis=1)
-
-df = preprocess_data(df)
 
 #%% TRAIN-TEST SPLIT
 
@@ -167,7 +183,6 @@ param_grid = {
     'mlp__hidden_layer_sizes': [(n_feat,), (2*n_feat,), (3*n_feat,),
                            (n_feat,n_feat,), (2*n_feat,2*n_feat,),
                            (2*n_feat,n_feat), (n_feat,2*n_feat,)],
-                           #(100,), (100,100,), (50,50,), (50,100,)],
     'mlp__activation': ['logistic', 'tanh', 'relu'],
     }
 
@@ -186,9 +201,10 @@ best_params_grid={'activation': best_params['mlp__activation'],
               'hidden_layer_sizes': best_params['mlp__hidden_layer_sizes'],
               'max_iter': best_params['mlp__max_iter']}
 
-# f=open(path+'MLP'+filename+'_best_params_and_GSCV_metrics.sav','w')
-# f.write(str(best_params_2)+'\n'+str(print_metrics(test_results, names=['Accuracy', 'Precision', 'Prec. Unstable', 'Recall', 'F1 score'])))
-# f.close()              
+# save best model parameters
+f=open(path+'MLP_best_params.sav','w')
+f.write(str(best_params))
+f.close()              
 
 estimator = Pipeline([('scaler', StandardScaler()), ('mlp', MLPClassifier(**best_params_grid))])
 
@@ -232,11 +248,10 @@ best_params_grid={'xgb__eta': best_params['xgb__eta'],
               'xgb__max_depth': best_params['xgb__max_depth'],
               'xgb__subsample': best_params['xgb__subsample']}
 
-# filename='BigModel_22marz_19comb.sav'
-              
-# f=open(path+'XGB'+filename+'_best_params_and_GSCV_metrics.sav','w')
-# f.write(str(best_params_2)+'\n'+str(print_metrics(test_results, names=['Accuracy', 'Precision', 'Prec. Unstable', 'Recall', 'F1 score'])))
-# f.close()              
+# save best model parameters
+f=open(path+'XGB_best_params.sav','w')
+f.write(str(best_params))
+f.close()            
 
 
 estimator = Pipeline([('scaler', StandardScaler()), ('xgb', XGBClassifier(**best_params_grid))])

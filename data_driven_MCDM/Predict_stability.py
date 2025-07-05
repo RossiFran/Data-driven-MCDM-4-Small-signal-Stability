@@ -8,9 +8,29 @@ from xgboost import XGBClassifier
 import warnings
 warnings.filterwarnings("ignore")
 
+#%%
+def system_bases():
+	Sb=500e6
+	Vb=280e3
+	Fb=50
+	Ib=Sb/(np.sqrt(3)*Vb)
+	Zb=Vb**2/Sb
+	Wb=2*np.pi*Fb
+	
+	return Sb, Vb, Fb, Ib, Zb, Wb 
+
+#%%
+if use_paper_model==True:
+    reproduce_paper='_paper'
+else:
+    reproduce_paper=str()
+
+#%%
+
 model_name='XGB'
 path='../Trainig_stability_assessment/Results/'
-filename=path+model_name+'_paper.sav'
+
+filename=path+model_name+reproduce_paper+'.sav'
 
 model = joblib.load(filename)
     
@@ -41,20 +61,33 @@ X['IPCF']=CCRC[5] # F is E
 
 #%% DATA CLEAN
 
-exec(open('./data_cleaning_model_paper/pu_params.sav').read())
+# exec(open('./data_cleaning'+reproduce_paper+'/pu_params.sav').read())
+# 
+# 
+# exec(open('./data_cleaning'+reproduce_paper+'/columns_groups.sav').read())
+# 
+# 
+# exec(open('./data_cleaning'+reproduce_paper+'/feature_creation.sav').read().replace('df','X'))
+# 
+# 
+# exec(open('./data_cleaning'+reproduce_paper+'/dataclean.sav').read())
+
+Sb, Vb, Fb, Ib, Zb, Wb = system_bases()
 
 
-exec(open('./data_cleaning_model_paper/columns_groups.sav').read())
+exec(open('../Datasets/columns_groups'+reproduce_paper+'.sav').read().replace('df','X'))
 
 
-exec(open('./data_cleaning_model_paper/feature_creation.sav').read().replace('df','X'))
+exec(open('../Datasets/feature_creation'+reproduce_paper+'.sav').read().replace('df','X'))
 
 
-exec(open('./data_cleaning_model_paper/dataclean.sav').read())
+exec(open(path+'PFI_features_'+model_name+reproduce_paper+'.sav').read().replace('df','X'))#_fbeta40perc
 
-exec(open(path+'PFI_features_'+model_name+'_paper.sav').read())#_fbeta40perc
+if reproduce_paper=='_paper':
 
-PFI_features = PFI_dict[model_name]
+    PFI_features = PFI_dict[model_name]
+else:
+    PFI_features = PFI_dict
 
 stab=model.predict(X[PFI_features])
 

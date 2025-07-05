@@ -14,7 +14,24 @@ from xgboost import XGBRegressor
 import warnings
 warnings.filterwarnings("ignore")
 
-path='../SelectedScripts/'
+#%%
+def system_bases():
+	Sb=500e6
+	Vb=280e3
+	Fb=50
+	Ib=Sb/(np.sqrt(3)*Vb)
+	Zb=Vb**2/Sb
+	Wb=2*np.pi*Fb
+	
+	return Sb, Vb, Fb, Ib, Zb, Wb 
+
+#%%
+if use_paper_model==True:
+    reproduce_paper='_paper'
+else:
+    reproduce_paper=str()
+
+#%%
 
 exec(open('../Settings/combinations.sav').read())
 
@@ -44,16 +61,17 @@ X['IPCF']=CCRC[5] # F is E
 
 #%% DATA CLEAN
 
-exec(open('./data_cleaning_model_paper/pu_params.sav').read())
+Sb, Vb, Fb, Ib, Zb, Wb = system_bases()
 
 
-exec(open('./data_cleaning_model_paper/columns_groups.sav').read())
+exec(open('../Datasets/columns_groups'+reproduce_paper+'.sav').read().replace('df','X'))
 
 
-exec(open('./data_cleaning_model_paper/feature_creation.sav').read().replace('df','X'))
+exec(open('../Datasets/feature_creation'+reproduce_paper+'.sav').read().replace('df','X'))
 
 
-exec(open('./data_cleaning_model_paper/dataclean.sav').read())
+exec(open('../Datasets/dataclean'+reproduce_paper+'.sav').read().replace('df','X'))
+
 
 def final_df(df): # Return final df (w/o removed columns and rows)
     return df.drop(columns_remove, axis=1, errors='ignore').drop(rows_remove, axis=0, errors='ignore')
@@ -61,7 +79,7 @@ def final_df(df): # Return final df (w/o removed columns and rows)
 X=final_df(X)
 
 #%%
-path_2_rgr='../Training_indicators_regression/Results/regressions_paper/'
+path_2_rgr='../Training_indicators_regression/Results/regressions'+reproduce_paper+'/'
 
 ind=0
 pred=np.zeros([len(list_indicators),1])

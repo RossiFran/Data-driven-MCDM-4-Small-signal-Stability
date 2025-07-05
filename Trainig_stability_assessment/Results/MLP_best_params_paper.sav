@@ -1,0 +1,1 @@
+{'activation': 'relu', 'hidden_layer_sizes': (87,), 'max_iter': 5000}

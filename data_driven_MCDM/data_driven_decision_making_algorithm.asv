@@ -1,8 +1,8 @@
 close all; clear all; clc;
 format long;
-% addpath 'Functions Optimitzacio'\
-% addpath State-Space\
 addpath("../Test_daily_profile/Intra_day_forecast_paper/");
+
+%% Set
 
 run create_list_of_CCRCs.m
 
@@ -35,7 +35,7 @@ T_results = table('Size', [0, length(columnNames)], ...
                    'VariableNames', columnNames);
 %%
 % == Main loop ==
-for iisamples=1:96%length(Pload_tot_vect)
+for iisamples=1:96
     constr_num_changes=1;
     iisamples
     
@@ -70,11 +70,6 @@ for iisamples=1:96%length(Pload_tot_vect)
             T_indicators.(str_indicator)={[]};
         end
     
-        T_indicators_not_scaled = table();
-        for ii_ind=1:length(list_indicators)
-            str_indicator = string(list_indicators(ii_ind));
-            T_indicators_not_scaled.(str_indicator)={[]};
-        end
         %% calculate T_decision for first OP
         if CCRC_prev_OP==-1
             CCRC_stables_constr=[];
@@ -127,7 +122,7 @@ for iisamples=1:96%length(Pload_tot_vect)
                 str_indicator = string(list_indicators(ii_ind));
                 T_decision = T_indicators.(str_indicator){:}.*weight_ind(ii_ind)+T_decision;
             end
-            T_decision =  T_decision - sum(table2array(T_results(iisamples-1,list_indicators_scaled).*weight_ind));
+            T_decision =  T_decision - sum(table2array(T_results(iisamples-1,list_indicators).*weight_ind));
         end
         %% check if the 
         % [min_val, min_val_index] = min(T_decision);
@@ -150,7 +145,7 @@ for iisamples=1:96%length(Pload_tot_vect)
 
                 %verify stability using precalculated stability by exact
                 %models (not valid to estimate computing time)
-                t_stab_file = readmatrix(['Stab_H2_DCgain_CCRC_',num2str(CCRC_prev_OP),'_daily_prof.xlsx']);
+                t_stab_file = readmatrix(['Stab_H2_DCgain_CCRC_',num2str(CCRC_to_be_verified),'_daily_prof.xlsx']);
                 stab = t_stab_file(iisamples,1);
                 
                 %verify stability using exact models 
@@ -189,10 +184,9 @@ for iisamples=1:96%length(Pload_tot_vect)
         str_indicator = string(list_indicators(ii_ind));
         T_results.(str_indicator)(iisamples)=T_indicators.(str_indicator){1}(min_val_index);%{[]};
     end   
-    %T_results.list_of_stable_CCRCs(iisamples)=list_stable_CCRCs_at_OP;
     T_results.N_of_checked_CCRCs(iisamples)=length(CCRC_stables_constr);
     list_of_stable_CCRCs_prev_OP=list_stable_CCRCs_at_OP;
     CCRC_prev_OP=T_results.CCRC(iisamples);
 end
 
-writetable(T_results,'./Decision_Making/Data_Driven_noweigths_oldmodel_verify_dailyprof_V2_comptime_ver.xlsx')
+writetable(T_results,'./CCRC_assignment_surrogate_models_from_paper_exact_models_precalculated.xlsx')

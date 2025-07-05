@@ -1,12 +1,16 @@
 close all; clear all; clc;
 format long;
-% addpath 'Functions Optimitzacio'\
-% addpath State-Space\
 addpath("../Test_daily_profile/Intra_day_forecast_paper/");
+
+%% Set reproduce_paper:
+% reproduce_paper = true to use the same trained models as in the paper
+% reproduce_paper = false to use the last version of the trained models
+reproduce_paper= false;
+%%
 
 run create_list_of_CCRCs.m
 
-selected_combinations=double(pyrunfile('CCRCs_selected.py','combinations_selected'));
+selected_combinations=double(pyrunfile('CCRCs_selected.py','combinations_selected',use_paper_model=reproduce_paper));
 
 list_indicators ={'H2_freq', 'H2_vdc','DCgain_freq','DCgain_vdc'};%
 
@@ -35,7 +39,7 @@ T_results = table('Size', [0, length(columnNames)], ...
                    'VariableNames', columnNames);
 %%
 % == Main loop ==
-for iisamples=1:96%length(Pload_tot_vect)
+for iisamples=1:96
     constr_num_changes=1;
     iisamples
     
@@ -44,7 +48,7 @@ for iisamples=1:96%length(Pload_tot_vect)
     list_stable_CCRCs_at_OP=[];
     %% check stable combinations at OP
     for ii=1:length(selected_combinations)
-        stab=pyrunfile('Predict_stability.py','stab', c=selected_combinations(ii), X=array2table(X_PF_IPC(iisamples,:)));
+        stab=pyrunfile('Predict_stability.py','stab', c=selected_combinations(ii), X=array2table(X_PF_IPC(iisamples,:)), use_paper_model = reproduce_paper);
         stab= double(py.array.array('d', py.numpy.nditer(stab)));
         if stab
             list_stable_CCRCs_at_OP = [list_stable_CCRCs_at_OP, selected_combinations(ii)];
@@ -74,7 +78,7 @@ for iisamples=1:96%length(Pload_tot_vect)
         if CCRC_prev_OP==-1
             CCRC_stables_constr=[];
             for ii=1:length(list_stable_CCRCs_at_OP)
-                pred_indicators=pyrunfile('Predict_indicators.py','pred', c=list_stable_CCRCs_at_OP(ii), X=array2table(X_PF_IPC(iisamples,:)), list_indicators=py.list(list_indicators));
+                pred_indicators=pyrunfile('Predict_indicators.py','pred', c=list_stable_CCRCs_at_OP(ii), X=array2table(X_PF_IPC(iisamples,:)), list_indicators=py.list(list_indicators), use_paper_model = reproduce_paper);
                 pred_indicators = double(py.array.array('d', py.numpy.nditer(pred_indicators)));
     
                 for ii_ind = 1:length(list_indicators)
@@ -101,7 +105,7 @@ for iisamples=1:96%length(Pload_tot_vect)
                         num_changes = sum(table2array(T_combinacions_viables(list_stable_CCRCs_at_OP(ii),[1:6]))~=table2array(T_combinacions_viables(T_results.CCRC(iisamples-1),[1:6])));
                         if num_changes<=constr_num_changes %num_changes>= constr_num_changes-1 && 
                             constr_num_changes_respected=1;
-                            pred_indicators=pyrunfile('Predict_indicators.py','pred', c=list_stable_CCRCs_at_OP(ii), X=array2table(X_PF_IPC(iisamples,:)), list_indicators=py.list(list_indicators));          
+                            pred_indicators=pyrunfile('Predict_indicators.py','pred', c=list_stable_CCRCs_at_OP(ii), X=array2table(X_PF_IPC(iisamples,:)), list_indicators=py.list(list_indicators), use_paper_model = reproduce_paper);         
                             pred_indicators = double(py.array.array('d', py.numpy.nditer(pred_indicators)));
     
                             for ii_ind = 1:length(list_indicators)

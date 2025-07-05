@@ -32,9 +32,10 @@ from sklearn import tree
 ##
 from metrics_n import *
 from utils import *
-from data_preprocessing import *
 from training_functions import *
 from scipy.stats.mstats import winsorize
+from create_dataset import *
+from data_preprocessing import *
 
 from sklearn.compose import TransformedTargetRegressor
 from sklearn.pipeline import make_pipeline
@@ -58,33 +59,47 @@ plt.rcParams.update({"figure.figsize" : [8, 10],
                     'legend.loc': 'upper right'})
 
 #%%
-# exclude_indicators=['Stable','Hinf_en', 'Hinf_freq', 'Hinf_vdc', 'H2_en', 'H2_freq', 'H2_vdc','DCgain_vdc','DCgain_freq']
+''' to use the same list of CCRCs selected in the paper set reproduce_paper='_paper', else reproduce_paper=str()'''
+
+reproduce_paper=str()#'_paper'
+
+#%%
 
 indicators_list=['H2_freq', 'H2_vdc','DCgain_vdc','DCgain_freq']
 
 #%%
 exec(open('../Settings/combinations.sav').read())
-exec(open('../CCRCs_clustering/Results/CCRC_dict_paper.sav').read())
+exec(open('../CCRCs_clustering/Results/CCRC_dict'+reproduce_paper+'.sav').read())
 
-combinations_selected=CCRCs_dict['selected_CCRC']
+combinations_selected=CCRC_dict['selected_CCRC']
 
-#%% ---- CREATE COMPLETE DB ----
-path='./Results/'
-path_data='./Data/'
+#%% ---- LOAD COMPLETE DB ----
+path='./Results/regressions/'
 
-filename='df_selected_combinations.csv'
+path_data='../Datasets/'
 
+#Load DB
+filename='df_selected_combinations'+reproduce_paper+'.csv'
 df=pd.read_csv(path_data+filename).drop('Unnamed: 0',axis=1)
 
 #%% DATA PREPROCESSING
 
 ##TODO: fix this in the files
-# df.rename(columns = {'P2l':'Pl2', 'P5l':'Pl5', 'P9l':'Pl9','Q2l':'Ql2', 'Q5l':'Ql5', 'Q9l':'Ql9'}, inplace = True)
-df_inputs = df.drop(indicators_list+['Stable'], axis=1)
+if reproduce_paper == '_paper':
+    df.rename(columns = {'P2l':'Pl2', 'P5l':'Pl5', 'P9l':'Pl9','Q2l':'Ql2', 'Q5l':'Ql5', 'Q9l':'Ql9'}, inplace = True)
 
-df_inputs= preprocess_data(df_inputs)
+Sb, Vb, Fb, Ib, Zb, Wb = system_bases()
 
-df=pd.concat([df_inputs,df[indicators_list+['Stable']]],axis=1)
+
+exec(open('../Datasets/columns_groups'+reproduce_paper+'.sav').read())
+
+
+exec(open('../Datasets/feature_creation'+reproduce_paper+'.sav').read())
+
+
+exec(open('../Datasets/dataclean'+reproduce_paper+'.sav').read())
+
+df = final_df(df, columns_remove, rows_remove)
 
 #%% Take only stable cases
 df_stab=df.query('Stable==1')
@@ -168,7 +183,6 @@ for c in range(0,len(combinations_selected)):
        model_comparison_r2.loc[c,indicator]=scores_indicators[indicator][0]['CCRC_{}'.format(combinations_selected[c])][0][models_list[max_index][0]][0]
 
 #%%
-# #model_comparison2=model_comparison.copy(deep=True).set_index('Combination')
 
 models_dict = {'Dummy': DummyRegressor(strategy='mean'),
                'LR': LinearRegression(),
@@ -219,19 +233,19 @@ for c in range(len(combinations_selected)):
 
         estimator.fit(X, Y)
 
-        filename=path+"Regr_"+indicator+"_CCRC"+str(comb)+".sav"
+        filename=path+"Regr_"+indicator+"_CCRC"+str(CCRC)+".sav"
 
         joblib.dump(estimator,filename)
 
 
 
-    f = open(path+"PFI_features_CCRC"+str(comb)+".sav","w")
-
-    # write file
-    f.write( 'PFI_dict='+str(PFI_dict) )
-
-    # close file
-    f.close()
+        f = open(path+"PFI_features_CCRC"+str(CCRC)+".sav","w")
+    
+        # write file
+        f.write( 'PFI_dict='+str(PFI_dict) )
+    
+        # close file
+        f.close()
 
 #%%
 use_PFI=pd.DataFrame(columns=['CCRC']+indicators_list)

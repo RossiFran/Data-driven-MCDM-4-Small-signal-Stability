@@ -1,0 +1,1 @@
+PFI_dict=['IPCE', 'IPCA', 'IPCC', 'IPCB', 'IPCD', 'mod_v_mmc1_pu', 'ang_i_mmc1_pu', 'mod_v_mmc4_pu', 'mod_i_mmc6_pu', 'mod_i_mmc3_pu', 'Qth1_pu lt 0', 'Qmmc4_pu lt 0', 'theta3', 'mod_Sg1_pu']
