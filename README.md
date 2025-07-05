@@ -50,4 +50,4 @@ The training pipeline follows a similar structure:
 
 ## References
 [1] Rossi, Francesca, et al. "Data-Driven Decision Making for Enhancing Small-Signal Stability in Hybrid AC/DC Grids Through Converter Control Role Assignment." arXiv preprint arXiv:2503.05386 (2025).
-[4] J. A. Soler, D. Groß, E. P. Araujo, O. G. Bellmunt, Interconnecting power converter control role assignment in grids with multiple ac and dc subgrids, IEEE Trans. Power Del. 38 (3) (2023). doi:10.1109/TPWRD.2023.3236977.
+[2] J. A. Soler, D. Groß, E. P. Araujo, O. G. Bellmunt, Interconnecting power converter control role assignment in grids with multiple ac and dc subgrids, IEEE Trans. Power Del. 38 (3) (2023). doi:10.1109/TPWRD.2023.3236977.
