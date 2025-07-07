@@ -19,9 +19,8 @@ list_indicators_index = [2 3 4 5]; %  % index of the indicator in the excel file
 % constr_num_changes=1;
 % constr_num_changes_start=constr_num_changes-1;
 weight_ind = [1 1 1 1] % weights of each indicator
-%weight_ind = [0.1 0.3 0.3  0.15 0.15] % weights of each indicator
 
-CCRC_prev_OP=-1; % initialize the CCRC of previous timestamp
+CCRC_prev_OP=-1; % initialize the CCRC of previous operating point (-1: unkown for previous CCRC for 1st OP)
 
 %% Power flows
 X_PF = readmatrix('X_PF.xlsx');
@@ -40,13 +39,14 @@ T_results = table('Size', [0, length(columnNames)], ...
 %%
 % == Main loop ==
 for iisamples=1:96
-    constr_num_changes=1;
+    constr_num_changes=1; %gamma: constraint on maximum simultaneous number of converter control roles changes
     iisamples
     
     tic();
 
     list_stable_CCRCs_at_OP=[];
-    %% check stable combinations at OP
+    %% Phase 1: Select the set of alternatives
+    % check stable combinations at OP with data-driven surrogate model
     for ii=1:length(selected_combinations)
         stab=pyrunfile('Predict_stability.py','stab', c=selected_combinations(ii), X=array2table(X_PF_IPC(iisamples,:)), use_paper_model = reproduce_paper);
         stab= double(py.array.array('d', py.numpy.nditer(stab)));
@@ -66,16 +66,17 @@ for iisamples=1:96
         end
     end
 
-    need_to_recalculate=1;
+    need_to_recalculate=1; % need_to_recalculate initialized =1 
     while need_to_recalculate==1
+        %% Phase 2: Compute the performance matrix 
+        % Initialize T_indicators
         T_indicators = table();
         for ii_ind=1:length(list_indicators)
             str_indicator = string(list_indicators(ii_ind));
             T_indicators.(str_indicator)={[]};
         end
     
-        %% calculate T_decision for first OP
-        if CCRC_prev_OP==-1
+        if CCRC_prev_OP==-1 % First OP
             CCRC_stables_constr=[];
             for ii=1:length(list_stable_CCRCs_at_OP)
                 pred_indicators=pyrunfile('Predict_indicators.py','pred', c=list_stable_CCRCs_at_OP(ii), X=array2table(X_PF_IPC(iisamples,:)), list_indicators=py.list(list_indicators), use_paper_model = reproduce_paper);
@@ -89,17 +90,16 @@ for iisamples=1:96
                 CCRC_stables_constr=[CCRC_stables_constr,list_stable_CCRCs_at_OP(ii)];
     
             end
-    
-            T_decision = zeros(1,length(list_stable_CCRCs_at_OP)); %--> Decide by min sum indicators
+            % Calculate the elements of the performance matrix
+            PerformanceMatrix = zeros(1,length(list_stable_CCRCs_at_OP)); 
             for ii_ind=1:length(list_indicators)
                 str_indicator = string(list_indicators(ii_ind));
-                T_decision = T_decision + T_indicators.(str_indicator){:}.*weight_ind(ii_ind);
+                PerformanceMatrix = PerformanceMatrix + T_indicators.(str_indicator){:}.*weight_ind(ii_ind); %--> calculate the performance matrix elements as the values of the stability indicators, as the values at the previous OP are unkown
             end
-        %% calculate T_decision for successive OP    
-        else
+        else % Successive OPs
             constr_num_changes_respected=0;
             CCRC_stables_constr=[];
-            while constr_num_changes_respected==0 && constr_num_changes<=6
+            while constr_num_changes_respected==0 && constr_num_changes<=6 %6= number of IPCs in the system -> maximum number of simultaneous control changes
                 for ii=1:length(list_stable_CCRCs_at_OP)
                     if ismember(list_stable_CCRCs_at_OP(ii),list_of_stable_CCRCs_prev_OP)
                         num_changes = sum(table2array(T_combinacions_viables(list_stable_CCRCs_at_OP(ii),[1:6]))~=table2array(T_combinacions_viables(T_results.CCRC(iisamples-1),[1:6])));
@@ -117,28 +117,27 @@ for iisamples=1:96
                     end            
                 end
                 if constr_num_changes_respected==0
-                    constr_num_changes=constr_num_changes+1;
+                    constr_num_changes=constr_num_changes+1; %increase the number of allowed changes
                 end
             end
             
-            T_decision = zeros(1,length(CCRC_stables_constr)); %--> Decide by min sum indicators
+            PerformanceMatrix = zeros(1,length(CCRC_stables_constr)); 
             for ii_ind=1:length(list_indicators)
                 str_indicator = string(list_indicators(ii_ind));
-                T_decision = T_indicators.(str_indicator){:}.*weight_ind(ii_ind)+T_decision;
+                PerformanceMatrix = T_indicators.(str_indicator){:}.*weight_ind(ii_ind)+PerformanceMatrix;
             end
-            T_decision =  T_decision - sum(table2array(T_results(iisamples-1,list_indicators).*weight_ind));
+            PerformanceMatrix =  PerformanceMatrix - sum(table2array(T_results(iisamples-1,list_indicators).*weight_ind)); %--> calculate the performance matrix elements as the difference with the values of the stability indicators at previous OP
         end
-        %% check if the 
-        % [min_val, min_val_index] = min(T_decision);
+        %% Phase 3: Solve the data-driven MCDM problem --> select X_C
         
-        T_results.Exec_time_dd(iisamples)=toc;
+        T_results.Exec_time_dd(iisamples)=toc; 
 
-        [sorted_values, sorted_indices] = sort(T_decision);    
+        [sorted_values, sorted_indices] = sort(PerformanceMatrix);    
     
         verify_sol=0;
-        idx_ver=1;
+        idx_ver=1; %take the first alternative (X_C) from the sorted performance matrix 
         while verify_sol==0
-            if idx_ver <= length(T_decision)
+            if idx_ver <= length(PerformanceMatrix)
                 min_val=sorted_values(idx_ver);
                 min_val_index=sorted_indices(idx_ver);
                 if CCRC_prev_OP==-1  
@@ -147,19 +146,20 @@ for iisamples=1:96
                     CCRC_to_be_verified=CCRC_stables_constr(min_val_index);
                 end
 
-                %verify stability using precalculated stability by exact
-                %models (not valid to estimate computing time)
+                %% Phase 4: Verify the stability of the data-driven MCDM by exact models
+                % verify stability using precalculated stability by exact
+                % models (not valid to estimate computing time)
                 t_stab_file = readmatrix(['Stab_H2_DCgain_CCRC_',num2str(CCRC_to_be_verified),'_daily_prof.xlsx']);
                 stab = t_stab_file(iisamples,1);
                 
-                %verify stability using exact models 
+                % verify stability using exact models 
                 % eval_stab_verify
-                %stab = Stab_Hinf_H2_dcgain_en_freq_vdc(iisamples,1);
+                % stab = Stab_Hinf_H2_dcgain_en_freq_vdc(iisamples,1);
 
                 if stab == 1
                     verify_sol=1;
                     T_results.verify(iisamples)=idx_ver;
-                    need_to_recalculate=0;
+                    need_to_recalculate=0;  
                 else
                    idx_ver=idx_ver+1;
                 end
@@ -170,6 +170,7 @@ for iisamples=1:96
         end
     end
 
+    %% Save results
     T_results.Exec_time(iisamples)=toc;
     if CCRC_prev_OP==-1  
         T_results.CCRC(iisamples)=list_stable_CCRCs_at_OP(min_val_index);
