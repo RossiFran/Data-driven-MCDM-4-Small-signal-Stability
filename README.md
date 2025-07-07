@@ -17,7 +17,7 @@ This repository contains all the necessary code to implement and reproduce the m
 
 #### `CCRCs_clustering/`
 
-Contains all scripts required to perform **clustering of the Candidate Converter Role Configurations (CCRCs)** based on their dynamic behavior with respect to each stability performance indicator.
+Contains all scripts required to perform **clustering of the Converter Control Role Configurations (CCRCs)** based on their dynamic behavior with respect to each stability performance indicator.
 The methodology identifies groups of CCRCs exhibiting similar stability characteristics, and then applies a **set intersection technique** to determine the optimal subset of CCRCs. This subset ensures robust dynamic performance across the entire operating space according to multiple stability indicators.
 
 #### `Datasets/`
