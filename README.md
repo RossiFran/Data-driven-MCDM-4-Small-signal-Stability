@@ -7,11 +7,8 @@ To overcome this limitation, this work introduces an online scheduling recalcula
 
 The proposed methodology is demonstrated on the test system shown in the Figure below [2].
 This repository contains all the necessary code to implement and reproduce the methodology for this case study.
-<br>
-<br>
-![power_syst_BigModel_bus.pdf](https://github.com/user-attachments/files/21076031/power_syst_BigModel_bus.pdf)
-<br>
-<br>
+
+<img src="https://github.com/user-attachments/assets/6dd868d0-18de-4608-838b-92d9a86bc754" alt="g7089" width="400"/>
 
 ### 📁 Repository Structure
 
