@@ -61,17 +61,6 @@ X['IPCF']=CCRC[5] # F is E
 
 #%% DATA CLEAN
 
-# exec(open('./data_cleaning'+reproduce_paper+'/pu_params.sav').read())
-# 
-# 
-# exec(open('./data_cleaning'+reproduce_paper+'/columns_groups.sav').read())
-# 
-# 
-# exec(open('./data_cleaning'+reproduce_paper+'/feature_creation.sav').read().replace('df','X'))
-# 
-# 
-# exec(open('./data_cleaning'+reproduce_paper+'/dataclean.sav').read())
-
 Sb, Vb, Fb, Ib, Zb, Wb = system_bases()
 
 

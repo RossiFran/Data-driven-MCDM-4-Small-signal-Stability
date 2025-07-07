@@ -193,4 +193,4 @@ for iisamples=1:96
     CCRC_prev_OP=T_results.CCRC(iisamples);
 end
 
-writetable(T_results,'./CCRC_assignment_surrogate_models_from_paper_exact_models_precalculated.xlsx')
+writetable(T_results,'./CCRC_assignment_surrogate_models_exact_models_precalculated.xlsx')

@@ -84,12 +84,19 @@ path_2_rgr='../Training_indicators_regression/Results/regressions'+reproduce_pap
 ind=0
 pred=np.zeros([len(list_indicators),1])
 
-exec(open(path_2_rgr+'PFI_features_comb'+str(int(c))+'.sav').read())
+try:
+    exec(open(path_2_rgr+'PFI_features_comb'+str(int(c))+'.sav').read())
+except:
+        exec(open(path_2_rgr+'PFI_features_CCRC'+str(int(c))+'.sav').read())
 
 for indicator in list_indicators: #
     PFI_features=PFI_dict[indicator]
-    filename='Regr_'+indicator+'_comb'+str(int(c))+'.sav'
-    model=joblib.load(path_2_rgr+filename)
+    try:
+        filename='Regr_'+indicator+'_comb'+str(int(c))+'.sav'
+        model=joblib.load(path_2_rgr+filename)
+    except:
+        filename='Regr_'+indicator+'_CCRC'+str(int(c))+'.sav'
+        model=joblib.load(path_2_rgr+filename)
     pred[ind,0]=model.predict(X[PFI_features])
     ind=ind+1    
     
