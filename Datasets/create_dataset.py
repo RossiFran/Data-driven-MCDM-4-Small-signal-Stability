@@ -29,6 +29,6 @@ def create_dataset_with_selected_CCRCs(path_data,path_source, CCRCs_list,combina
         df=pd.concat([df,df_CCRC],axis=0)
      
     df=df.reset_index(drop=True)
-    df.to_csv(path_data+filename, index=True, index_label='Case', header=True)    
+    df.to_csv(path_data+filename, index=False, header=True)    
 
     return df
